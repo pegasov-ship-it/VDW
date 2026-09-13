@@ -1,5 +1,4 @@
 aiogram>=3.20,<4
-
 yt-dlp
-
 cryptography
+asyncpg>=0.30,<1
