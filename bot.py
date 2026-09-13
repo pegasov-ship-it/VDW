@@ -38,21 +38,14 @@ ADMIN_ID = int(
 )
 
 DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    ""
+    "DATABASE_URL", ""
 ).strip()
 
 DATA_ENCRYPTION_KEY = os.getenv(
-    "DATA_ENCRYPTION_KEY",
-    ""
+    "DATA_ENCRYPTION_KEY", ""
 ).strip()
 
-
-# ------------------------------------------------------------
-# Application limits for ordinary users.
-# Admin bypasses these application-level limits.
-# ------------------------------------------------------------
-
+# Лимиты, которые устанавливаем мы для обычных пользователей.
 APP_MAX_FILE_MB = int(
     os.getenv("MAX_FILE_MB", "50")
 )
@@ -71,14 +64,9 @@ DOWNLOAD_TIMEOUT = int(
     )
 )
 
-
-# ------------------------------------------------------------
-# Telegram standard Bot API limit.
-#
-# Later, when Local Bot API Server is connected,
-# this can be changed to 2000.
-# ------------------------------------------------------------
-
+# Реальный лимит обычного Telegram Bot API.
+# Когда перейдем на Local Bot API Server, можно будет
+# поменять на 2000.
 TELEGRAM_MAX_FILE_MB = int(
     os.getenv(
         "TELEGRAM_MAX_FILE_MB",
@@ -86,8 +74,6 @@ TELEGRAM_MAX_FILE_MB = int(
     )
 )
 
-
-# Leave a tiny safety margin.
 SAFE_FILE_BYTES = int(
     min(
         APP_MAX_FILE_MB,
@@ -100,7 +86,7 @@ SAFE_FILE_BYTES = int(
 
 
 # ============================================================
-# ENVIRONMENT VALIDATION
+# ENVIRONMENT CHECK
 # ============================================================
 
 if not BOT_TOKEN:
@@ -108,24 +94,20 @@ if not BOT_TOKEN:
         "BOT_TOKEN is not configured"
     )
 
-
 if not DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL is not configured"
     )
-
 
 if not DATA_ENCRYPTION_KEY:
     raise RuntimeError(
         "DATA_ENCRYPTION_KEY is not configured"
     )
 
-
 try:
     FERNET = Fernet(
         DATA_ENCRYPTION_KEY.encode()
     )
-
 except Exception as exc:
     raise RuntimeError(
         "DATA_ENCRYPTION_KEY is invalid"
@@ -152,25 +134,16 @@ logger = logging.getLogger(
 
 
 # ============================================================
-# GLOBAL DATABASE POOL
+# GLOBAL STATE
 # ============================================================
 
 db_pool: Optional[asyncpg.Pool] = None
-
-
-# ============================================================
-# RUNTIME STATE
-# ============================================================
-
-# These dictionaries contain only temporary process state.
-# They do not persist user files or URLs permanently.
 
 pending_urls: dict[int, str] = {}
 
 pending_info: dict[int, dict] = {}
 
 active_downloads: set[int] = set()
-
 
 URL_RE = re.compile(
     r"^https?://\S+$",
@@ -183,9 +156,7 @@ URL_RE = re.compile(
 # ============================================================
 
 TEXT = {
-
     "ru": {
-
         "welcome":
             "👋 <b>Добро пожаловать в Video Downloader</b>\n\n"
             "Выберите язык:",
@@ -224,8 +195,8 @@ TEXT = {
 
         "quality":
             "🎬 <b>Выберите качество</b>\n\n"
-            "Размер указан приблизительно, если его "
-            "можно определить заранее.",
+            "Размер указан приблизительно, "
+            "если его можно определить заранее.",
 
         "downloading":
             "⏳ Скачиваю видео…",
@@ -310,9 +281,7 @@ TEXT = {
             "🗑 Удалить всю историю",
     },
 
-
     "en": {
-
         "welcome":
             "👋 <b>Welcome to Video Downloader</b>\n\n"
             "Choose your language:",
@@ -324,16 +293,17 @@ TEXT = {
             "and use the submitted content.\n\n"
             "The service is not intended for copyright "
             "infringement or violation of third-party rights.\n\n"
-            "Temporary video files are deleted from the server "
-            "after processing.",
+            "Temporary video files are deleted from the "
+            "server after processing.",
 
         "privacy":
             "🔐 <b>Privacy</b>\n\n"
-            "We store only minimal information required to "
-            "operate: Telegram ID, name/username, language "
-            "and technical download history.\n\n"
-            "Video files are not permanently stored on the "
-            "server. Temporary files are deleted after processing.\n\n"
+            "We store only minimal information required "
+            "to operate: Telegram ID, name/username, "
+            "language and technical download history.\n\n"
+            "Video files are not permanently stored on "
+            "the server. Temporary files are deleted "
+            "after processing.\n\n"
             "You can delete stored data from Settings.",
 
         "ready":
@@ -439,21 +409,17 @@ TEXT = {
 }
 
 
-# ============================================================
-# GENERAL HELPERS
-# ============================================================
-
 def tr(
     language: str,
     key: str
 ) -> str:
 
-    dictionary = TEXT.get(
+    language_dict = TEXT.get(
         language,
         TEXT["ru"]
     )
 
-    return dictionary.get(
+    return language_dict.get(
         key,
         TEXT["ru"][key]
     )
@@ -473,13 +439,11 @@ def format_bytes(
 ) -> str:
 
     if size < 1024 * 1024:
-
         return (
             f"{size / 1024:.1f} KB"
         )
 
     if size < 1024 * 1024 * 1024:
-
         return (
             f"{size / 1024**2:.1f} MB"
         )
@@ -501,9 +465,7 @@ def user_hash(
 ) -> str:
 
     return hashlib.sha256(
-        f"telegram:{telegram_id}".encode(
-            "utf-8"
-        )
+        f"telegram:{telegram_id}".encode()
     ).hexdigest()
 
 
@@ -527,13 +489,11 @@ def decrypt(
         return None
 
     try:
-
         return FERNET.decrypt(
             value.encode("utf-8")
         ).decode("utf-8")
 
     except InvalidToken:
-
         return None
 
 
@@ -548,7 +508,7 @@ def is_admin(
 # DATABASE
 # ============================================================
 
-async def init_db() -> None:
+async def init_db():
 
     global db_pool
 
@@ -565,31 +525,18 @@ async def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS users (
                 id BIGSERIAL PRIMARY KEY,
-
                 user_hash TEXT UNIQUE NOT NULL,
-
                 telegram_id_encrypted TEXT NOT NULL,
-
                 username_encrypted TEXT,
-
                 first_name_encrypted TEXT,
-
                 language TEXT NOT NULL DEFAULT 'ru',
-
                 setup_complete BOOLEAN NOT NULL DEFAULT FALSE,
-
                 terms_accepted BOOLEAN NOT NULL DEFAULT FALSE,
-
                 is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
-
                 created_at TIMESTAMPTZ NOT NULL,
-
                 last_activity TIMESTAMPTZ NOT NULL,
-
                 downloads_count BIGINT NOT NULL DEFAULT 0,
-
                 failed_count BIGINT NOT NULL DEFAULT 0,
-
                 total_bytes BIGINT NOT NULL DEFAULT 0
             )
             """
@@ -599,19 +546,12 @@ async def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS downloads (
                 id BIGSERIAL PRIMARY KEY,
-
                 user_hash TEXT NOT NULL,
-
                 title_encrypted TEXT,
-
                 url_encrypted TEXT,
-
                 quality TEXT NOT NULL,
-
                 size_bytes BIGINT NOT NULL DEFAULT 0,
-
                 status TEXT NOT NULL,
-
                 created_at TIMESTAMPTZ NOT NULL
             )
             """
@@ -626,7 +566,7 @@ async def init_db() -> None:
 
         await conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_downloads_user_hash
+            CREATE INDEX IF NOT EXISTS idx_downloads_user
             ON downloads(user_hash)
             """
         )
@@ -643,7 +583,7 @@ async def init_db() -> None:
     )
 
 
-async def close_db() -> None:
+async def close_db():
 
     global db_pool
 
@@ -676,11 +616,7 @@ async def ensure_user(
     telegram_id: int,
     username: Optional[str],
     first_name: Optional[str],
-) -> None:
-
-    h = user_hash(
-        telegram_id
-    )
+):
 
     stamp = now()
 
@@ -724,10 +660,8 @@ async def ensure_user(
                 last_activity =
                     EXCLUDED.last_activity
             """,
-            h,
-            encrypt(
-                str(telegram_id)
-            ),
+            user_hash(telegram_id),
+            encrypt(str(telegram_id)),
             encrypt(username),
             encrypt(first_name),
             stamp,
@@ -737,7 +671,7 @@ async def ensure_user(
 async def set_language(
     telegram_id: int,
     language: str
-) -> None:
+):
 
     async with db_pool.acquire() as conn:
 
@@ -756,7 +690,7 @@ async def set_language(
 
 async def accept_terms(
     telegram_id: int
-) -> None:
+):
 
     async with db_pool.acquire() as conn:
 
@@ -778,7 +712,7 @@ async def accept_terms(
 
 async def delete_user_data(
     telegram_id: int
-) -> None:
+):
 
     h = user_hash(
         telegram_id
@@ -806,7 +740,7 @@ async def delete_user_data(
 async def set_blocked(
     telegram_id: int,
     blocked: bool
-) -> None:
+):
 
     async with db_pool.acquire() as conn:
 
@@ -830,7 +764,7 @@ async def add_download(
     quality: str,
     size_bytes: int,
     status: str,
-) -> None:
+):
 
     h = user_hash(
         telegram_id
@@ -891,6 +825,7 @@ async def add_download(
             await conn.execute(
                 """
                 UPDATE users
+
                 SET
                     failed_count =
                         failed_count + 1
@@ -909,19 +844,16 @@ def language_keyboard():
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-
             [
                 InlineKeyboardButton(
                     text="🇷🇺 Русский",
                     callback_data="lang:ru",
                 ),
-
                 InlineKeyboardButton(
                     text="🇬🇧 English",
                     callback_data="lang:en",
                 ),
-            ],
-
+            ]
         ]
     )
 
@@ -930,7 +862,7 @@ def consent_keyboard(
     language: str
 ):
 
-    accept_text = (
+    text = (
         "✅ Принять и продолжить"
         if language == "ru"
         else
@@ -939,26 +871,22 @@ def consent_keyboard(
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-
             [
                 InlineKeyboardButton(
-                    text=accept_text,
+                    text=text,
                     callback_data="consent:accept",
-                ),
+                )
             ],
-
             [
                 InlineKeyboardButton(
                     text="📄 Terms",
                     callback_data="info:terms",
                 ),
-
                 InlineKeyboardButton(
                     text="🔐 Privacy",
                     callback_data="info:privacy",
                 ),
             ],
-
         ]
     )
 
@@ -969,35 +897,22 @@ def main_keyboard(
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-
             [
                 InlineKeyboardButton(
-                    text=tr(
-                        language,
-                        "download_button"
-                    ),
+                    text=TEXT[language]["download_button"],
                     callback_data="menu:download",
-                ),
+                )
             ],
-
             [
                 InlineKeyboardButton(
-                    text=tr(
-                        language,
-                        "history_button"
-                    ),
+                    text=TEXT[language]["history_button"],
                     callback_data="menu:history",
                 ),
-
                 InlineKeyboardButton(
-                    text=tr(
-                        language,
-                        "settings_button"
-                    ),
+                    text=TEXT[language]["settings_button"],
                     callback_data="menu:settings",
                 ),
             ],
-
         ]
     )
 
@@ -1008,180 +923,39 @@ def settings_keyboard(
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-
             [
                 InlineKeyboardButton(
                     text="🇷🇺 Русский",
                     callback_data="settings_lang:ru",
                 ),
-
                 InlineKeyboardButton(
                     text="🇬🇧 English",
                     callback_data="settings_lang:en",
                 ),
             ],
-
             [
                 InlineKeyboardButton(
                     text="📄 Terms",
                     callback_data="info:terms",
                 ),
-
                 InlineKeyboardButton(
                     text="🔐 Privacy",
                     callback_data="info:privacy",
                 ),
             ],
-
             [
                 InlineKeyboardButton(
-                    text=tr(
-                        language,
-                        "delete_data"
-                    ),
+                    text=TEXT[language]["delete_data"],
                     callback_data="account:delete",
-                ),
+                )
             ],
-
         ]
     )
 
 
-def quality_keyboard(
-    info: dict,
-    language: str
-):
-
-    buttons = []
-
-    auto_quality_value, auto_size = (
-        choose_auto_quality(
-            info
-        )
-    )
-
-    if auto_quality_value is not None:
-
-        auto_text = (
-            f"🎯 Авто — "
-            f"{auto_quality_value}p "
-            f"~{format_bytes(auto_size)}"
-            if language == "ru"
-            else
-            f"🎯 Auto — "
-            f"{auto_quality_value}p "
-            f"~{format_bytes(auto_size)}"
-        )
-
-    else:
-
-        auto_text = tr(
-            language,
-            "auto"
-        )
-
-    buttons.append(
-        [
-            InlineKeyboardButton(
-                text=auto_text,
-                callback_data="quality:auto",
-            )
-        ]
-    )
-
-    max_height = max_available_height(
-        info
-    )
-
-    for quality in (
-        1080,
-        720,
-        480,
-        360,
-    ):
-
-        if max_height < quality:
-            continue
-
-        estimated = estimate_total_size(
-            info,
-            quality
-        )
-
-        if estimated is None:
-
-            button_text = (
-                f"{quality}p"
-            )
-
-        elif estimated <= SAFE_FILE_BYTES:
-
-            button_text = (
-                f"{quality}p — "
-                f"~{format_bytes(estimated)} ✅"
-            )
-
-        else:
-
-            button_text = (
-                f"{quality}p — "
-                f"~{format_bytes(estimated)} ❌"
-            )
-
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    text=button_text,
-                    callback_data=(
-                        f"quality:{quality}"
-                    ),
-                )
-            ]
-        )
-
-    if max_height > 1080:
-
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    text=tr(
-                        language,
-                        "best"
-                    ),
-                    callback_data="quality:best",
-                )
-            ]
-        )
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=buttons
-    )
-
-
 # ============================================================
-# YT-DLP ANALYSIS
+# QUALITY
 # ============================================================
-
-def extract_info_sync(
-    url: str
-) -> dict:
-
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "socket_timeout": DOWNLOAD_TIMEOUT,
-    }
-
-    with yt_dlp.YoutubeDL(
-        options
-    ) as ydl:
-
-        return ydl.extract_info(
-            url,
-            download=False,
-        )
-
 
 def format_size(
     fmt: dict
@@ -1192,18 +966,15 @@ def format_size(
         or fmt.get("filesize_approx")
     )
 
-    if not value:
+    if value is None:
         return None
 
     try:
-
         return int(value)
-
     except (
         TypeError,
         ValueError,
     ):
-
         return None
 
 
@@ -1222,16 +993,15 @@ def max_available_height(
             "height"
         )
 
-        video_codec = fmt.get(
+        vcodec = fmt.get(
             "vcodec"
         )
 
         if (
             height
-            and video_codec
-            and video_codec != "none"
+            and vcodec
+            and vcodec != "none"
         ):
-
             heights.append(
                 int(height)
             )
@@ -1258,7 +1028,7 @@ def best_video_format(
             "height"
         )
 
-        video_codec = fmt.get(
+        vcodec = fmt.get(
             "vcodec"
         )
 
@@ -1266,19 +1036,13 @@ def best_video_format(
             fmt
         )
 
-        if not height:
-            continue
-
-        if not video_codec:
-            continue
-
-        if video_codec == "none":
-            continue
-
-        if height > max_height:
-            continue
-
-        if size is None:
+        if (
+            not height
+            or not vcodec
+            or vcodec == "none"
+            or height > max_height
+            or size is None
+        ):
             continue
 
         score = (
@@ -1298,7 +1062,7 @@ def best_video_format(
         return None
 
     candidates.sort(
-        key=lambda item: item[0],
+        key=lambda x: x[0],
         reverse=True,
     )
 
@@ -1316,11 +1080,11 @@ def best_audio_format(
         or []
     ):
 
-        audio_codec = fmt.get(
+        acodec = fmt.get(
             "acodec"
         )
 
-        video_codec = fmt.get(
+        vcodec = fmt.get(
             "vcodec"
         )
 
@@ -1328,19 +1092,15 @@ def best_audio_format(
             fmt
         )
 
-        if not audio_codec:
-            continue
-
-        if audio_codec == "none":
-            continue
-
         if (
-            video_codec
-            and video_codec != "none"
+            not acodec
+            or acodec == "none"
+            or (
+                vcodec
+                and vcodec != "none"
+            )
+            or size is None
         ):
-            continue
-
-        if size is None:
             continue
 
         bitrate = float(
@@ -1365,7 +1125,7 @@ def best_audio_format(
         return None
 
     candidates.sort(
-        key=lambda item: item[0],
+        key=lambda x: x[0],
         reverse=True,
     )
 
@@ -1403,7 +1163,6 @@ def estimate_total_size(
         )
 
         if audio_size:
-
             total += audio_size
 
     return total
@@ -1441,9 +1200,135 @@ def choose_auto_quality(
     )
 
 
+def quality_keyboard(
+    info: dict,
+    language: str
+):
+
+    buttons = []
+
+    auto_quality, auto_size = (
+        choose_auto_quality(
+            info
+        )
+    )
+
+    if auto_quality is not None:
+
+        auto_text = (
+            f"🎯 Авто — "
+            f"{auto_quality}p "
+            f"~{format_bytes(auto_size)}"
+            if language == "ru"
+            else
+            f"🎯 Auto — "
+            f"{auto_quality}p "
+            f"~{format_bytes(auto_size)}"
+        )
+
+    else:
+
+        auto_text = TEXT[language]["auto"]
+
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text=auto_text,
+                callback_data="quality:auto",
+            )
+        ]
+    )
+
+    max_height = max_available_height(
+        info
+    )
+
+    for quality in (
+        1080,
+        720,
+        480,
+        360,
+    ):
+
+        if max_height < quality:
+            continue
+
+        estimated = estimate_total_size(
+            info,
+            quality
+        )
+
+        if estimated is None:
+
+            text = f"{quality}p"
+
+        elif estimated <= SAFE_FILE_BYTES:
+
+            text = (
+                f"{quality}p — "
+                f"~{format_bytes(estimated)} ✅"
+            )
+
+        else:
+
+            text = (
+                f"{quality}p — "
+                f"~{format_bytes(estimated)} ❌"
+            )
+
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=text,
+                    callback_data=(
+                        f"quality:{quality}"
+                    ),
+                )
+            ]
+        )
+
+    # If source has higher resolutions,
+    # expose "Best" separately.
+    if max_height > 1080:
+
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=TEXT[language]["best"],
+                    callback_data="quality:best",
+                )
+            ]
+        )
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=buttons
+    )
+
+
 # ============================================================
-# YT-DLP DOWNLOAD
+# YT-DLP
 # ============================================================
+
+def extract_info_sync(
+    url: str
+) -> dict:
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "socket_timeout": DOWNLOAD_TIMEOUT,
+    }
+
+    with yt_dlp.YoutubeDL(
+        options
+    ) as ydl:
+
+        return ydl.extract_info(
+            url,
+            download=False,
+        )
+
 
 def format_selector(
     quality: str
@@ -1455,17 +1340,17 @@ def format_selector(
             "bv*+ba/b"
         )
 
-    quality_int = int(
+    q = int(
         quality
     )
 
     return (
-        f"bv*[height<={quality_int}]"
+        f"bv*[height<={q}]"
         "[ext=mp4]"
         "+ba[ext=m4a]/"
-        f"bv*[height<={quality_int}]"
+        f"bv*[height<={q}]"
         "+ba/"
-        f"b[height<={quality_int}]"
+        f"b[height<={q}]"
     )
 
 
@@ -1484,19 +1369,12 @@ def download_sync(
         "format": format_selector(
             quality
         ),
-
         "outtmpl": output,
-
         "merge_output_format": "mp4",
-
         "noplaylist": True,
-
         "quiet": True,
-
         "no_warnings": True,
-
         "retries": 2,
-
         "socket_timeout": DOWNLOAD_TIMEOUT,
     }
 
@@ -1510,22 +1388,21 @@ def download_sync(
         )
 
     files = [
-        item
-        for item in Path(
+        p
+        for p in Path(
             temp_dir
         ).iterdir()
-        if item.is_file()
+        if p.is_file()
     ]
 
     if not files:
-
         raise RuntimeError(
             "Downloaded file not found"
         )
 
     media_file = max(
         files,
-        key=lambda path: path.stat().st_size
+        key=lambda p: p.stat().st_size
     )
 
     title = (
@@ -1634,13 +1511,13 @@ async def is_blocked_user(
 
 
 # ============================================================
-# LANGUAGE SELECTION
+# LANGUAGE
 # ============================================================
 
 @dp.callback_query(
     F.data.startswith("lang:")
 )
-async def language_select(
+async def select_language(
     callback: CallbackQuery
 ):
 
@@ -1673,7 +1550,7 @@ async def language_select(
 @dp.callback_query(
     F.data == "consent:accept"
 )
-async def consent_accept(
+async def accept_consent(
     callback: CallbackQuery
 ):
 
@@ -1804,7 +1681,7 @@ async def privacy_command(
 @dp.callback_query(
     F.data == "menu:settings"
 )
-async def menu_settings(
+async def settings_menu(
     callback: CallbackQuery
 ):
 
@@ -1887,13 +1764,13 @@ async def settings_language(
 
 
 # ============================================================
-# DELETE ACCOUNT DATA
+# DELETE USER DATA
 # ============================================================
 
 @dp.callback_query(
     F.data == "account:delete"
 )
-async def account_delete(
+async def delete_account(
     callback: CallbackQuery
 ):
 
@@ -1917,12 +1794,12 @@ async def account_delete(
 
     pending_urls.pop(
         telegram_id,
-        None,
+        None
     )
 
     pending_info.pop(
         telegram_id,
-        None,
+        None
     )
 
     active_downloads.discard(
@@ -1963,12 +1840,12 @@ async def delete_me(
 
     pending_urls.pop(
         telegram_id,
-        None,
+        None
     )
 
     pending_info.pop(
         telegram_id,
-        None,
+        None
     )
 
     active_downloads.discard(
@@ -2075,7 +1952,9 @@ async def receive_url(
 
     if (
         telegram_id in active_downloads
-        and not is_admin(telegram_id)
+        and not is_admin(
+            telegram_id
+        )
     ):
 
         await message.answer(
@@ -2103,21 +1982,18 @@ async def receive_url(
             telegram_id
         ] = info
 
-        keyboard = quality_keyboard(
-            info,
-            language,
-        )
-
         await status_message.edit_text(
             TEXT[language]["quality"],
-            reply_markup=keyboard,
+            reply_markup=quality_keyboard(
+                info,
+                language,
+            ),
         )
 
     except Exception:
 
         logger.exception(
-            "Analysis failed for user %s",
-            telegram_id,
+            "Analysis failed"
         )
 
         await status_message.edit_text(
@@ -2178,7 +2054,9 @@ async def quality_selected(
 
     if (
         telegram_id in active_downloads
-        and not is_admin(telegram_id)
+        and not is_admin(
+            telegram_id
+        )
     ):
 
         await callback.answer(
@@ -2189,51 +2067,51 @@ async def quality_selected(
         return
 
     # --------------------------------------------------------
-    # AUTO QUALITY
+    # AUTO
     # --------------------------------------------------------
 
     if quality == "auto":
 
-        if info:
+        auto_quality_value, _ = (
+            choose_auto_quality(
+                info or {}
+            )
+        )
 
-            auto_quality_value, auto_size = (
-                choose_auto_quality(
-                    info
-                )
+        if auto_quality_value is None:
+
+            pending_urls.pop(
+                telegram_id,
+                None
             )
 
-            if auto_quality_value is None:
-
-                pending_urls.pop(
-                    telegram_id,
-                    None,
-                )
-
-                pending_info.pop(
-                    telegram_id,
-                    None,
-                )
-
-                await callback.message.edit_text(
-                    TEXT[language]["too_large"]
-                )
-
-                await callback.answer()
-
-                return
-
-            quality = str(
-                auto_quality_value
+            pending_info.pop(
+                telegram_id,
+                None
             )
+
+            await callback.message.edit_text(
+                TEXT[language]["too_large"]
+            )
+
+            await callback.answer()
+
+            return
+
+        quality = str(
+            auto_quality_value
+        )
 
     # --------------------------------------------------------
-    # PRE-DOWNLOAD ESTIMATE
+    # PRE-DOWNLOAD CHECK
     # --------------------------------------------------------
 
     if (
         info
         and quality.isdigit()
-        and not is_admin(telegram_id)
+        and not is_admin(
+            telegram_id
+        )
     ):
 
         estimated = estimate_total_size(
@@ -2248,33 +2126,23 @@ async def quality_selected(
 
             if int(quality) == 360:
 
-                response_text = (
+                await callback.message.edit_text(
                     TEXT[language]["too_large"]
                 )
 
             else:
 
-                response_text = (
-                    TEXT[language][
-                        "quality_too_large"
-                    ]
+                await callback.message.edit_text(
+                    TEXT[language]["quality_too_large"],
+                    reply_markup=quality_keyboard(
+                        info,
+                        language,
+                    ),
                 )
-
-            await callback.message.edit_text(
-                response_text,
-                reply_markup=quality_keyboard(
-                    info,
-                    language,
-                ),
-            )
 
             await callback.answer()
 
             return
-
-    # --------------------------------------------------------
-    # ADMIN BYPASSES APPLICATION CONCURRENCY LIMIT
-    # --------------------------------------------------------
 
     if not is_admin(
         telegram_id
@@ -2292,17 +2160,11 @@ async def quality_selected(
         )
     )
 
-    temp_dir = None
+    temp_dir = tempfile.mkdtemp(
+        prefix="video_downloader_"
+    )
 
     try:
-
-        # ----------------------------------------------------
-        # TEMPORARY SERVER DIRECTORY
-        # ----------------------------------------------------
-
-        temp_dir = tempfile.mkdtemp(
-            prefix="video_downloader_"
-        )
 
         (
             media_file,
@@ -2317,11 +2179,13 @@ async def quality_selected(
         )
 
         # ----------------------------------------------------
-        # APPLICATION DURATION LIMIT
+        # DURATION
         # ----------------------------------------------------
 
         if (
-            not is_admin(telegram_id)
+            not is_admin(
+                telegram_id
+            )
             and duration
             and int(duration)
                 > APP_MAX_DURATION_SECONDS
@@ -2349,11 +2213,13 @@ async def quality_selected(
             return
 
         # ----------------------------------------------------
-        # ACTUAL FILE SIZE CHECK
+        # FINAL SIZE
         # ----------------------------------------------------
 
         if (
-            not is_admin(telegram_id)
+            not is_admin(
+                telegram_id
+            )
             and size_bytes > SAFE_FILE_BYTES
         ):
 
@@ -2387,7 +2253,7 @@ async def quality_selected(
             return
 
         # ----------------------------------------------------
-        # SEND
+        # SEND TO TELEGRAM
         # ----------------------------------------------------
 
         await status_message.edit_text(
@@ -2412,7 +2278,7 @@ async def quality_selected(
         )
 
         # ----------------------------------------------------
-        # DB HISTORY
+        # HISTORY
         # ----------------------------------------------------
 
         await add_download(
@@ -2459,24 +2325,22 @@ async def quality_selected(
     finally:
 
         # ----------------------------------------------------
-        # ABSOLUTELY DELETE TEMPORARY VIDEO DIRECTORY
+        # DELETE SERVER-SIDE TEMPORARY FILES
         # ----------------------------------------------------
 
-        if temp_dir:
-
-            shutil.rmtree(
-                temp_dir,
-                ignore_errors=True,
-            )
+        shutil.rmtree(
+            temp_dir,
+            ignore_errors=True,
+        )
 
         pending_urls.pop(
             telegram_id,
-            None,
+            None
         )
 
         pending_info.pop(
             telegram_id,
-            None,
+            None
         )
 
         if not is_admin(
@@ -2552,36 +2416,34 @@ async def history(
 
     buttons = []
 
-    for item in rows:
+    for row in rows:
 
         title = (
             decrypt(
-                item["title_encrypted"]
+                row["title_encrypted"]
             )
             or "Video"
         )
 
         size = format_bytes(
             int(
-                item["size_bytes"]
+                row["size_bytes"]
             )
         )
 
         lines.append(
             f"🎬 <b>{esc(title[:70])}</b>\n"
-            f"{esc(str(item['quality']))}p"
+            f"{esc(str(row['quality']))}p"
             f" • {size}\n"
         )
 
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=(
-                        f"🗑 {title[:30]}"
-                    ),
+                    text=f"🗑 {title[:30]}",
                     callback_data=(
                         f"history_delete:"
-                        f"{item['id']}"
+                        f"{row['id']}"
                     ),
                 )
             ]
@@ -2593,9 +2455,7 @@ async def history(
                 text=TEXT[language][
                     "delete_history"
                 ],
-                callback_data=(
-                    "history:clear"
-                ),
+                callback_data="history:clear",
             )
         ]
     )
@@ -2718,7 +2578,7 @@ async def clear_history(
 
 
 # ============================================================
-# ADMIN PANEL
+# ADMIN
 # ============================================================
 
 @dp.message(
@@ -2740,12 +2600,12 @@ async def admin_panel(
         "/users — users\n"
         "/user TELEGRAM_ID — user card\n"
         "/recent — recent downloads\n"
-        "/block TELEGRAM_ID — block user\n"
-        "/unblock TELEGRAM_ID — unblock user\n"
+        "/block TELEGRAM_ID — block\n"
+        "/unblock TELEGRAM_ID — unblock\n"
         "/broadcast TEXT — broadcast\n\n"
 
         "Application-level download restrictions "
-        "are disabled for the admin ID.\n\n"
+        "are disabled for the admin.\n\n"
 
         "External Telegram/API and infrastructure "
         "limits still apply."
@@ -2806,7 +2666,7 @@ async def admin_stats(
         "📊 <b>Statistics</b>\n\n"
         f"Users: {users}\n"
         f"Successful downloads: {success}\n"
-        f"Failed: {failed}\n"
+        f"Failed downloads: {failed}\n"
         f"Transferred: "
         f"{format_bytes(int(total or 0))}"
     )
@@ -2877,28 +2737,18 @@ async def admin_users(
         )
 
         text += (
-            f"👤 <b>"
-            f"{esc(first_name)}"
-            f"</b>\n"
-
+            f"👤 <b>{esc(first_name)}</b>\n"
             f"ID: "
-            f"<code>"
-            f"{esc(telegram_id)}"
-            f"</code>\n"
-
+            f"<code>{esc(telegram_id)}</code>\n"
             f"@{esc(username)}\n"
-
             f"Downloads: "
             f"{row['downloads_count']}\n"
-
             f"Errors: "
             f"{row['failed_count']}\n"
-
             f"Blocked: "
             f"{row['is_blocked']}\n\n"
         )
 
-    # Telegram message safety.
     while text:
 
         chunk = text[:3500]
@@ -2976,54 +2826,31 @@ async def admin_user(
 
     username = (
         decrypt(
-            row[
-                "username_encrypted"
-            ]
+            row["username_encrypted"]
         )
         or "-"
     )
 
     first_name = (
         decrypt(
-            row[
-                "first_name_encrypted"
-            ]
+            row["first_name_encrypted"]
         )
         or "-"
     )
 
     await message.answer(
         "👤 <b>User</b>\n\n"
-
-        f"ID: "
-        f"<code>{target_id}</code>\n"
-
-        f"Name: "
-        f"{esc(first_name)}\n"
-
-        f"Username: "
-        f"@{esc(username)}\n"
-
-        f"Language: "
-        f"{row['language']}\n"
-
-        f"Downloads: "
-        f"{row['downloads_count']}\n"
-
-        f"Errors: "
-        f"{row['failed_count']}\n"
-
+        f"ID: <code>{target_id}</code>\n"
+        f"Name: {esc(first_name)}\n"
+        f"Username: @{esc(username)}\n"
+        f"Language: {row['language']}\n"
+        f"Downloads: {row['downloads_count']}\n"
+        f"Errors: {row['failed_count']}\n"
         f"Transferred: "
         f"{format_bytes(int(row['total_bytes']))}\n"
-
-        f"Blocked: "
-        f"{row['is_blocked']}\n"
-
-        f"Created: "
-        f"{row['created_at']}\n"
-
-        f"Last activity: "
-        f"{row['last_activity']}"
+        f"Blocked: {row['is_blocked']}\n"
+        f"Created: {row['created_at']}\n"
+        f"Last activity: {row['last_activity']}"
     )
 
 
@@ -3075,20 +2902,13 @@ async def admin_recent(
         )
 
         lines.append(
-            f"🎬 "
-            f"{esc(title[:60])}\n"
-
+            f"🎬 {esc(title[:60])}\n"
             f"Quality: "
             f"{esc(str(row['quality']))}p\n"
-
             f"Size: "
-            f"{format_bytes("
-                f"int(row['size_bytes'])"
-                f")}\n"
-
+            f"{format_bytes(int(row['size_bytes']))}\n"
             f"Status: "
             f"{esc(row['status'])}\n"
-
             f"Date: "
             f"{row['created_at']}\n"
         )
@@ -3274,7 +3094,6 @@ async def admin_broadcast(
 
             failed += 1
 
-        # Keep broadcast traffic conservative.
         await asyncio.sleep(
             0.05
         )
@@ -3298,7 +3117,7 @@ async def main():
         "Video Downloader started"
     )
 
-    # Ensure we use long polling.
+    # Long polling.
     await bot.delete_webhook(
         drop_pending_updates=True
     )
