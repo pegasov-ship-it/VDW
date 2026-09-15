@@ -16,18 +16,12 @@ from urllib.request import Request, urlopen
 import asyncpg
 import yt_dlp
 from cryptography.fernet import Fernet, InvalidToken
-
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import (
-    CallbackQuery,
-    FSInputFile,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -35,12 +29,7 @@ DATA_ENCRYPTION_KEY = os.getenv("DATA_ENCRYPTION_KEY", "").strip()
 COBALT_API_URL = os.getenv("COBALT_API_URL", "").strip().rstrip("/")
 BGUTIL_POT_SERVER = os.getenv("BGUTIL_POT_SERVER", "").strip().rstrip("/")
 
-ADMIN_ID = int(
-    os.getenv(
-        "ADMIN_ID",
-        "0",
-    )
-)
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 MAX_FILE_MB = int(
     os.getenv(
@@ -63,15 +52,22 @@ DOWNLOAD_TIMEOUT = int(
     )
 )
 
-SAFE_FILE_BYTES = int(
-    min(
-        MAX_FILE_MB,
-        TELEGRAM_MAX_FILE_MB,
-    )
-    * 1024
-    * 1024
-    * 0.98
+# Safety margin below Telegram's 50 MB bot upload limit.
+# Use decimal MB here so the value shown to the user matches the check.
+SAFE_FILE_BYTES = min(
+    MAX_FILE_MB,
+    TELEGRAM_MAX_FILE_MB,
+) * 1_000_000
+
+SAFE_FILE_BYTES = min(
+    SAFE_FILE_BYTES,
+    49_500_000,
 )
+
+
+# ============================================================
+# VALIDATION
+# ============================================================
 
 required_env = {
     "BOT_TOKEN": BOT_TOKEN,
@@ -95,6 +91,11 @@ except Exception as exc:
         "DATA_ENCRYPTION_KEY is invalid"
     ) from exc
 
+
+# ============================================================
+# LOGGING
+# ============================================================
+
 logging.basicConfig(
     level=logging.INFO,
     format=(
@@ -105,9 +106,12 @@ logging.basicConfig(
     ),
 )
 
-logger = logging.getLogger(
-    "vdw"
-)
+logger = logging.getLogger("vdw")
+
+
+# ============================================================
+# BOT
+# ============================================================
 
 bot = Bot(
     BOT_TOKEN,
@@ -118,11 +122,17 @@ bot = Bot(
 
 dp = Dispatcher()
 
+
+# ============================================================
+# STATE
+# ============================================================
+
 DB_POOL: Optional[asyncpg.Pool] = None
 
 PENDING: dict[int, dict] = {}
 
 ACTIVE: set[int] = set()
+
 
 URL_RE = re.compile(
     r"^https?://\S+$",
@@ -148,6 +158,11 @@ QUALITY_ORDER = (
     360,
     240,
 )
+
+
+# ============================================================
+# TEXT
+# ============================================================
 
 TEXT = {
     "ru": {
@@ -321,7 +336,7 @@ TEXT = {
         "too_large":
             "❌ <b>This video cannot be downloaded</b>\n\n"
             "Even the lowest available quality exceeds "
-            "the 50 MB limit.\n\n"
+            "50 MB.\n\n"
             "Please try a shorter video.",
 
         "quality_too_large":
@@ -520,8 +535,10 @@ async def ensure_user(
             DO UPDATE SET
                 username_encrypted =
                     EXCLUDED.username_encrypted,
+
                 first_name_encrypted =
                     EXCLUDED.first_name_encrypted,
+
                 last_activity =
                     EXCLUDED.last_activity
             """,
@@ -669,8 +686,10 @@ async def record_download(
                 SET
                     downloads_count =
                         downloads_count + 1,
+
                     total_bytes =
                         total_bytes + $1
+
                 WHERE user_hash = $2
                 """,
                 int(size_bytes),
@@ -703,8 +722,12 @@ def encrypt(
         return None
 
     return FERNET.encrypt(
-        value.encode("utf-8")
-    ).decode("utf-8")
+        value.encode(
+            "utf-8"
+        )
+    ).decode(
+        "utf-8"
+    )
 
 
 def decrypt(
@@ -718,8 +741,12 @@ def decrypt(
     try:
 
         return FERNET.decrypt(
-            value.encode("utf-8")
-        ).decode("utf-8")
+            value.encode(
+                "utf-8"
+            )
+        ).decode(
+            "utf-8"
+        )
 
     except InvalidToken:
 
@@ -750,20 +777,20 @@ def fmt_bytes(
     size: int,
 ) -> str:
 
-    if size < 1024 * 1024:
+    if size < 1_000_000:
 
         return (
-            f"{size / 1024:.1f} KB"
+            f"{size / 1_000:.1f} KB"
         )
 
-    if size < 1024**3:
+    if size < 1_000_000_000:
 
         return (
-            f"{size / 1024**2:.1f} MB"
+            f"{size / 1_000_000:.1f} MB"
         )
 
     return (
-        f"{size / 1024**3:.2f} GB"
+        f"{size / 1_000_000_000:.2f} GB"
     )
 
 
@@ -785,7 +812,9 @@ def is_admin(
     user_id: int,
 ) -> bool:
 
-    return user_id == ADMIN_ID
+    return (
+        user_id == ADMIN_ID
+    )
 
 
 def is_youtube(
@@ -843,8 +872,7 @@ def consent_keyboard(
                     text=(
                         "✅ Принять и продолжить"
                         if language == "ru"
-                        else
-                        "✅ Accept & continue"
+                        else "✅ Accept & continue"
                     ),
                     callback_data="consent:accept",
                 )
@@ -1048,7 +1076,8 @@ def quality_keyboard(
         )
 
     if any(
-        int(item["quality"]) > 1080
+        int(item["quality"])
+        > 1080
         for item in items
     ):
 
@@ -1199,7 +1228,9 @@ def get_format_size(
 
     try:
 
-        return int(value)
+        return int(
+            value
+        )
 
     except (
         TypeError,
@@ -1223,7 +1254,10 @@ def get_video_formats(
         if (
             not fmt.get("height")
             or fmt.get("vcodec")
-            in (None, "none")
+            in (
+                None,
+                "none",
+            )
         ):
 
             continue
@@ -1282,11 +1316,11 @@ def get_video_formats(
                 "vcodec":
                     fmt.get("vcodec"),
 
-                "acodec":
-                    fmt.get("acodec"),
-
                 "fps":
-                    fmt.get("fps"),
+                    float(
+                        fmt.get("fps")
+                        or 0
+                    ),
             }
         )
 
@@ -1321,8 +1355,13 @@ def best_video_format(
         )
 
         h264 = int(
-            vcodec.startswith("avc1")
-            or vcodec.startswith("h264")
+            vcodec.startswith(
+                "avc1"
+            )
+            or
+            vcodec.startswith(
+                "h264"
+            )
         )
 
         mp4 = int(
@@ -1330,19 +1369,22 @@ def best_video_format(
             == "mp4"
         )
 
+        fps = float(
+            fmt.get("fps")
+            or 0
+        )
+
+        # Highest available resolution up to the requested one;
+        # then phone-friendly H.264/MP4/FPS;
+        # among equivalent variants, prefer the smaller stream.
         candidates.append(
             (
                 (
                     fmt["height"],
                     h264,
                     mp4,
-                    float(
-                        fmt.get(
-                            "fps"
-                        )
-                        or 0
-                    ),
-                    fmt["size"],
+                    fps,
+                    -fmt["size"],
                 ),
                 fmt,
             )
@@ -1352,14 +1394,11 @@ def best_video_format(
 
         return None
 
-    candidates.sort(
+    return max(
+        candidates,
         key=lambda item:
-            item[0],
-
-        reverse=True,
-    )
-
-    return candidates[0][1]
+            item[0]
+    )[1]
 
 
 def best_audio_format(
@@ -1375,7 +1414,8 @@ def best_audio_format(
 
         if (
             not fmt.get("acodec")
-            or fmt["acodec"] == "none"
+            or fmt["acodec"]
+            == "none"
         ):
 
             continue
@@ -1412,9 +1452,30 @@ def best_audio_format(
                 (
                     m4a,
                     abr,
-                    size,
+                    -size,
                 ),
-                fmt,
+                {
+                    "format_id":
+                        fmt.get(
+                            "format_id"
+                        ),
+
+                    "size":
+                        size,
+
+                    "ext":
+                        fmt.get(
+                            "ext"
+                        ),
+
+                    "abr":
+                        abr,
+
+                    "acodec":
+                        fmt.get(
+                            "acodec"
+                        ),
+                },
             )
         )
 
@@ -1422,49 +1483,11 @@ def best_audio_format(
 
         return None
 
-    candidates.sort(
+    return max(
+        candidates,
         key=lambda item:
-            item[0],
-
-        reverse=True,
-    )
-
-    return candidates[0][1]
-
-
-def estimate_youtube_size(
-    info: dict,
-    height: int,
-) -> Optional[int]:
-
-    video = best_video_format(
-        info,
-        height,
-    )
-
-    audio = best_audio_format(
-        info
-    )
-
-    if not video:
-
-        return None
-
-    total = (
-        video["size"]
-        or 0
-    )
-
-    if audio:
-
-        total += (
-            get_format_size(
-                audio
-            )
-            or 0
-        )
-
-    return total
+            item[0]
+    )[1]
 
 
 def youtube_items(
@@ -1498,10 +1521,8 @@ def youtube_items(
                     str(quality),
 
                 "size":
-                    estimate_youtube_size(
-                        info,
-                        quality,
-                    ),
+                    video["size"]
+                    + audio["size"],
 
                 "video_format_id":
                     video["format_id"],
@@ -1510,10 +1531,14 @@ def youtube_items(
                     audio["format_id"],
 
                 "width":
-                    video.get("width"),
+                    video.get(
+                        "width"
+                    ),
 
                 "height":
-                    video.get("height"),
+                    video.get(
+                        "height"
+                    ),
             }
         )
 
@@ -1524,11 +1549,9 @@ def choose_youtube_auto(
     info: dict,
 ) -> Optional[dict]:
 
-    items = youtube_items(
+    for item in youtube_items(
         info
-    )
-
-    for item in items:
+    ):
 
         if (
             item.get("size")
@@ -1615,6 +1638,7 @@ def download_youtube_sync(
 def cobalt_request_sync(
     url: str,
     quality: str,
+    always_proxy: bool = False,
 ) -> dict:
 
     payload = {
@@ -1630,6 +1654,12 @@ def cobalt_request_sync(
         "filenameStyle":
             "pretty",
     }
+
+    if always_proxy:
+
+        payload[
+            "alwaysProxy"
+        ] = True
 
     request = Request(
         f"{COBALT_API_URL}/",
@@ -1699,7 +1729,6 @@ def cobalt_media(
             "stream",
             "success",
         )
-
         and response.get("url")
     ):
 
@@ -1726,7 +1755,6 @@ def cobalt_media(
             if (
                 item.get("type")
                 == "video"
-
                 and item.get("url")
             ):
 
@@ -1768,6 +1796,7 @@ def cobalt_media(
 
 async def cobalt_items(
     url: str,
+    always_proxy: bool = False,
 ) -> list[dict]:
 
     result = []
@@ -1787,6 +1816,7 @@ async def cobalt_items(
                     cobalt_request_sync,
                     url,
                     quality,
+                    always_proxy,
                 )
             )
 
@@ -2488,7 +2518,7 @@ async def text_router(
         ):
 
             logger.info(
-                "Routing URL to yt-dlp"
+                "Routing YouTube URL to yt-dlp"
             )
 
             info = await asyncio.to_thread(
@@ -2527,17 +2557,19 @@ async def text_router(
         ):
 
             logger.info(
-                "Routing Instagram URL to Cobalt"
+                "Routing Instagram/Reels URL "
+                "to Cobalt with alwaysProxy"
             )
 
             items = await cobalt_items(
-                url
+                url,
+                always_proxy=True,
             )
 
             if not items:
 
                 raise RuntimeError(
-                    "No usable Instagram formats"
+                    "No usable Instagram/Cobalt formats"
                 )
 
             PENDING[
@@ -2551,6 +2583,9 @@ async def text_router(
 
                 "items":
                     items,
+
+                "always_proxy":
+                    True,
             }
 
         else:
@@ -2580,6 +2615,9 @@ async def text_router(
 
                 "items":
                     items,
+
+                "always_proxy":
+                    False,
             }
 
         await status.edit_text(
@@ -2880,10 +2918,11 @@ async def quality_selected(
             width = None
             height = None
 
-        if not media.exists():
+        if not media or not media.exists():
 
             raise RuntimeError(
-                "Downloaded media file does not exist"
+                "Downloaded media file "
+                "does not exist"
             )
 
         size_bytes = media.stat().st_size
@@ -2964,10 +3003,6 @@ async def quality_selected(
             TEXT[language]["sending"]
         )
 
-        filename = Path(
-            media.name
-        ).name
-
         caption = (
             f"🎬 <b>{esc(title)}</b>\n"
             f"Quality: "
@@ -3045,7 +3080,8 @@ async def quality_selected(
         except Exception:
 
             logger.exception(
-                "Failed to record download failure"
+                "Failed to record "
+                "download failure"
             )
 
         await status.edit_text(
@@ -3145,7 +3181,9 @@ async def history_menu(
             f"🎬 <b>{esc(title[:70])}</b>\n"
             f"{item['quality']}p"
             f" • "
-            f"{fmt_bytes(int(item['size_bytes']))}\n"
+            f"{fmt_bytes("
+            f"int(item['size_bytes'])"
+            f")}\n"
         )
 
         buttons.append(
@@ -3753,6 +3791,11 @@ async def main():
         "BGUTIL_POT_SERVER: %s",
         BGUTIL_POT_SERVER
         or "NOT SET",
+    )
+
+    logger.info(
+        "SAFE_FILE_BYTES: %s",
+        SAFE_FILE_BYTES,
     )
 
     logger.info(
