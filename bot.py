@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import html
+import json
 import logging
 import os
 import re
@@ -28,35 +29,11 @@ from aiogram.types import (
     Message,
 )
 
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-BOT_TOKEN = os.getenv(
-    "BOT_TOKEN",
-    "",
-).strip()
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "",
-).strip()
-
-DATA_ENCRYPTION_KEY = os.getenv(
-    "DATA_ENCRYPTION_KEY",
-    "",
-).strip()
-
-COBALT_API_URL = os.getenv(
-    "COBALT_API_URL",
-    "",
-).strip().rstrip("/")
-
-BGUTIL_POT_SERVER = os.getenv(
-    "BGUTIL_POT_SERVER",
-    "",
-).strip().rstrip("/")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DATA_ENCRYPTION_KEY = os.getenv("DATA_ENCRYPTION_KEY", "").strip()
+COBALT_API_URL = os.getenv("COBALT_API_URL", "").strip().rstrip("/")
+BGUTIL_POT_SERVER = os.getenv("BGUTIL_POT_SERVER", "").strip().rstrip("/")
 
 ADMIN_ID = int(
     os.getenv(
@@ -96,11 +73,6 @@ SAFE_FILE_BYTES = int(
     * 0.98
 )
 
-
-# ============================================================
-# VALIDATION
-# ============================================================
-
 required_env = {
     "BOT_TOKEN": BOT_TOKEN,
     "DATABASE_URL": DATABASE_URL,
@@ -116,19 +88,12 @@ for name, value in required_env.items():
 
 try:
     FERNET = Fernet(
-        DATA_ENCRYPTION_KEY.encode(
-            "utf-8"
-        )
+        DATA_ENCRYPTION_KEY.encode("utf-8")
     )
 except Exception as exc:
     raise RuntimeError(
         "DATA_ENCRYPTION_KEY is invalid"
     ) from exc
-
-
-# ============================================================
-# LOGGING
-# ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -144,11 +109,6 @@ logger = logging.getLogger(
     "vdw"
 )
 
-
-# ============================================================
-# BOT
-# ============================================================
-
 bot = Bot(
     BOT_TOKEN,
     default=DefaultBotProperties(
@@ -157,11 +117,6 @@ bot = Bot(
 )
 
 dp = Dispatcher()
-
-
-# ============================================================
-# STATE
-# ============================================================
 
 DB_POOL: Optional[asyncpg.Pool] = None
 
@@ -179,6 +134,11 @@ YOUTUBE_RE = re.compile(
     re.IGNORECASE,
 )
 
+INSTAGRAM_RE = re.compile(
+    r"instagram\.com",
+    re.IGNORECASE,
+)
+
 QUALITY_ORDER = (
     2160,
     1440,
@@ -186,12 +146,8 @@ QUALITY_ORDER = (
     720,
     480,
     360,
+    240,
 )
-
-
-# ============================================================
-# TEXT
-# ============================================================
 
 TEXT = {
     "ru": {
@@ -550,7 +506,6 @@ async def ensure_user(
                 created_at,
                 last_activity
             )
-
             VALUES (
                 $1,
                 $2,
@@ -559,19 +514,14 @@ async def ensure_user(
                 $5,
                 $5
             )
-
             ON CONFLICT (
                 user_hash
             )
-
             DO UPDATE SET
-
                 username_encrypted =
                     EXCLUDED.username_encrypted,
-
                 first_name_encrypted =
                     EXCLUDED.first_name_encrypted,
-
                 last_activity =
                     EXCLUDED.last_activity
             """,
@@ -690,7 +640,6 @@ async def record_download(
                 status,
                 created_at
             )
-
             VALUES (
                 $1,
                 $2,
@@ -720,10 +669,8 @@ async def record_download(
                 SET
                     downloads_count =
                         downloads_count + 1,
-
                     total_bytes =
                         total_bytes + $1
-
                 WHERE user_hash = $2
                 """,
                 int(size_bytes),
@@ -752,6 +699,7 @@ def encrypt(
 ) -> Optional[str]:
 
     if value is None:
+
         return None
 
     return FERNET.encrypt(
@@ -764,6 +712,7 @@ def decrypt(
 ) -> Optional[str]:
 
     if not value:
+
         return None
 
     try:
@@ -836,9 +785,7 @@ def is_admin(
     user_id: int,
 ) -> bool:
 
-    return (
-        user_id == ADMIN_ID
-    )
+    return user_id == ADMIN_ID
 
 
 def is_youtube(
@@ -847,6 +794,17 @@ def is_youtube(
 
     return bool(
         YOUTUBE_RE.search(
+            url
+        )
+    )
+
+
+def is_instagram(
+    url: str,
+) -> bool:
+
+    return bool(
+        INSTAGRAM_RE.search(
             url
         )
     )
@@ -1010,7 +968,8 @@ def quality_keyboard(
     for quality in QUALITY_ORDER:
 
         if any(
-            item["quality"] == str(quality)
+            item["quality"]
+            == str(quality)
             for item in usable
         ):
 
@@ -1066,7 +1025,10 @@ def quality_keyboard(
                 f"~{fmt_bytes(item['size'])}"
             )
 
-            if item["size"] <= SAFE_FILE_BYTES:
+            if (
+                item["size"]
+                <= SAFE_FILE_BYTES
+            ):
 
                 label += " ✅"
 
@@ -1158,7 +1120,7 @@ class YTDLPLogger:
         message,
     ):
 
-        message = str(
+        text = str(
             message
         )
 
@@ -1172,13 +1134,13 @@ class YTDLPLogger:
 
         if any(
             item.lower()
-            in message.lower()
+            in text.lower()
             for item in interesting
         ):
 
             logger.info(
                 "yt-dlp: %s",
-                message,
+                text,
             )
 
     def warning(
@@ -1342,7 +1304,10 @@ def best_video_format(
         info
     ):
 
-        if fmt["height"] > max_height:
+        if (
+            fmt["height"]
+            > max_height
+        ):
 
             continue
 
@@ -1388,7 +1353,9 @@ def best_video_format(
         return None
 
     candidates.sort(
-        key=lambda item: item[0],
+        key=lambda item:
+            item[0],
+
         reverse=True,
     )
 
@@ -1456,7 +1423,9 @@ def best_audio_format(
         return None
 
     candidates.sort(
-        key=lambda item: item[0],
+        key=lambda item:
+            item[0],
+
         reverse=True,
     )
 
@@ -1648,8 +1617,6 @@ def cobalt_request_sync(
     quality: str,
 ) -> dict:
 
-    import json
-
     payload = {
         "url":
             url,
@@ -1668,7 +1635,9 @@ def cobalt_request_sync(
         f"{COBALT_API_URL}/",
         data=json.dumps(
             payload
-        ).encode("utf-8"),
+        ).encode(
+            "utf-8"
+        ),
         headers={
             "Accept":
                 "application/json",
@@ -1730,6 +1699,7 @@ def cobalt_media(
             "stream",
             "success",
         )
+
         and response.get("url")
     ):
 
@@ -1756,6 +1726,7 @@ def cobalt_media(
             if (
                 item.get("type")
                 == "video"
+
                 and item.get("url")
             ):
 
@@ -1806,6 +1777,7 @@ async def cobalt_items(
         "720",
         "480",
         "360",
+        "240",
     ):
 
         try:
@@ -2550,6 +2522,37 @@ async def text_router(
                     items,
             }
 
+        elif is_instagram(
+            url
+        ):
+
+            logger.info(
+                "Routing Instagram URL to Cobalt"
+            )
+
+            items = await cobalt_items(
+                url
+            )
+
+            if not items:
+
+                raise RuntimeError(
+                    "No usable Instagram formats"
+                )
+
+            PENDING[
+                user_id
+            ] = {
+                "source":
+                    "cobalt",
+
+                "url":
+                    url,
+
+                "items":
+                    items,
+            }
+
         else:
 
             logger.info(
@@ -2677,6 +2680,7 @@ async def quality_selected(
             "720",
             "480",
             "360",
+            "240",
         ):
 
             candidate = next(
@@ -2752,7 +2756,7 @@ async def quality_selected(
 
         if (
             selected["quality"]
-            == "360"
+            == "240"
         ):
 
             await callback.message.edit_text(
@@ -2898,7 +2902,10 @@ async def quality_selected(
                 "failed",
             )
 
-            if selected["quality"] == "360":
+            if (
+                selected["quality"]
+                == "240"
+            ):
 
                 await status.edit_text(
                     TEXT[language]["too_large"],
@@ -2952,12 +2959,6 @@ async def quality_selected(
             )
 
             return
-
-        # ----------------------------------------------------
-        # SEND AS TELEGRAM VIDEO
-        #
-        # The file is temporary and deleted in finally.
-        # ----------------------------------------------------
 
         await status.edit_text(
             TEXT[language]["sending"]
@@ -3056,7 +3057,6 @@ async def quality_selected(
 
     finally:
 
-        # Always delete temporary server files.
         shutil.rmtree(
             temp_dir,
             ignore_errors=True,
