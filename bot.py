@@ -464,6 +464,7 @@ TEXT = {
 def encrypt(
     value: Optional[str],
 ) -> Optional[str]:
+
     if value is None:
         return None
 
@@ -475,6 +476,7 @@ def encrypt(
 def decrypt(
     value: Optional[str],
 ) -> Optional[str]:
+
     if not value:
         return None
 
@@ -490,6 +492,7 @@ def decrypt(
 def user_hash(
     user_id: int,
 ) -> str:
+
     return hashlib.sha256(
         f"telegram:{user_id}".encode(
             "utf-8"
@@ -500,6 +503,7 @@ def user_hash(
 def esc(
     value: Optional[str],
 ) -> str:
+
     return html.escape(
         value or ""
     )
@@ -508,6 +512,7 @@ def esc(
 def fmt_bytes(
     size: int,
 ) -> str:
+
     if size < 1024 * 1024:
         return f"{size / 1024:.1f} KB"
 
@@ -520,6 +525,7 @@ def fmt_bytes(
 def row_language(
     row,
 ) -> str:
+
     if (
         row
         and row["language"] in TEXT
@@ -532,22 +538,29 @@ def row_language(
 def is_admin(
     user_id: int,
 ) -> bool:
+
     return user_id == ADMIN_ID
 
 
 def is_youtube(
     url: str,
 ) -> bool:
+
     return bool(
-        YOUTUBE_RE.search(url)
+        YOUTUBE_RE.search(
+            url
+        )
     )
 
 
 def is_instagram(
     url: str,
 ) -> bool:
+
     return bool(
-        INSTAGRAM_RE.search(url)
+        INSTAGRAM_RE.search(
+            url
+        )
     )
 
 
@@ -607,21 +620,26 @@ async def init_db():
             """
         )
 
-        for statement in (
+        await conn.execute(
             """
             ALTER TABLE downloads
             ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT
-            """,
+            """
+        )
+
+        await conn.execute(
             """
             ALTER TABLE downloads
             ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT
-            """,
+            """
+        )
+
+        await conn.execute(
             """
             ALTER TABLE downloads
             ADD COLUMN IF NOT EXISTS telegram_file_id TEXT
-            """,
-        ):
-            await conn.execute(statement)
+            """
+        )
 
         await conn.execute(
             """
@@ -705,7 +723,9 @@ async def ensure_user(
                     EXCLUDED.last_activity
             """,
             user_hash(user_id),
-            encrypt(str(user_id)),
+            encrypt(
+                str(user_id)
+            ),
             encrypt(username),
             encrypt(first_name),
             now,
@@ -1112,16 +1132,19 @@ def quality_keyboard(
         for item in items
         if (
             item.get("size") is None
-            or item["size"] <= SAFE_FILE_BYTES
+            or item["size"]
+            <= SAFE_FILE_BYTES
         )
     ]
 
     auto_quality = next(
         (
-            str(q)
-            for q in QUALITY_ORDER
+            str(quality)
+            for quality in QUALITY_ORDER
             if any(
-                item["quality"] == str(q)
+                item["quality"]
+                == str(quality)
+
                 for item in usable
             )
         ),
@@ -1133,12 +1156,13 @@ def quality_keyboard(
         item = next(
             item
             for item in items
-            if item["quality"] == auto_quality
+            if item["quality"]
+            == auto_quality
         )
 
         label = (
-            f"{TEXT[language]['auto']} "
-            f"— {auto_quality}p"
+            f"{TEXT[language]['auto']}"
+            f" — {auto_quality}p"
         )
 
         if item.get("size"):
@@ -1305,16 +1329,16 @@ def ytdlp_extract_sync(
     client: str,
 ):
 
-    options = ytdlp_options(
+    opts = ytdlp_options(
         client
     )
 
-    options[
+    opts[
         "logger"
     ] = YTDLPLogger()
 
     with yt_dlp.YoutubeDL(
-        options
+        opts
     ) as ydl:
 
         return ydl.extract_info(
@@ -1333,15 +1357,18 @@ def fmt_size(
     )
 
     if value is None:
+
         return None
 
     try:
+
         return int(value)
 
     except (
         TypeError,
         ValueError,
     ):
+
         return None
 
 
@@ -1359,7 +1386,10 @@ def video_formats(
         if (
             not fmt.get("height")
             or fmt.get("vcodec")
-            in (None, "none")
+            in (
+                None,
+                "none",
+            )
         ):
 
             continue
@@ -1380,8 +1410,12 @@ def video_formats(
         try:
 
             width = (
-                int(fmt["width"])
-                if fmt.get("width")
+                int(
+                    fmt["width"]
+                )
+                if fmt.get(
+                    "width"
+                )
                 is not None
                 else None
             )
@@ -1418,6 +1452,16 @@ def video_formats(
 
                 "fps":
                     fmt.get("fps"),
+
+                "aspect_ratio":
+                    fmt.get(
+                        "aspect_ratio"
+                    ),
+
+                "stretched_ratio":
+                    fmt.get(
+                        "stretched_ratio"
+                    ),
             }
         )
 
@@ -1463,7 +1507,9 @@ def audio_formats(
         result.append(
             {
                 "format_id":
-                    fmt.get("format_id"),
+                    fmt.get(
+                        "format_id"
+                    ),
 
                 "size":
                     size,
@@ -1496,7 +1542,10 @@ def best_video(
         info
     ):
 
-        if fmt["height"] > max_height:
+        if (
+            fmt["height"]
+            > max_height
+        ):
 
             continue
 
@@ -1505,13 +1554,19 @@ def best_video(
             continue
 
         codec = str(
-            fmt.get("vcodec")
+            fmt.get(
+                "vcodec"
+            )
             or ""
         )
 
         h264 = int(
-            codec.startswith("avc1")
-            or codec.startswith("h264")
+            codec.startswith(
+                "avc1"
+            )
+            or codec.startswith(
+                "h264"
+            )
         )
 
         mp4 = int(
@@ -1519,20 +1574,20 @@ def best_video(
             == "mp4"
         )
 
-        score = (
-            fmt["height"],
-            h264,
-            mp4,
-            float(
-                fmt.get("fps")
-                or 0
-            ),
-            fmt["size"],
-        )
-
         candidates.append(
             (
-                score,
+                (
+                    fmt["height"],
+                    h264,
+                    mp4,
+                    float(
+                        fmt.get(
+                            "fps"
+                        )
+                        or 0
+                    ),
+                    fmt["size"],
+                ),
                 fmt,
             )
         )
@@ -1615,7 +1670,7 @@ def make_youtube_items(
 
             continue
 
-        estimated_size = (
+        estimated = (
             video["size"]
             + audio["size"]
         )
@@ -1626,7 +1681,7 @@ def make_youtube_items(
                     str(quality),
 
                 "size":
-                    estimated_size,
+                    estimated,
 
                 "video_format_id":
                     video["format_id"],
@@ -1639,6 +1694,16 @@ def make_youtube_items(
 
                 "height":
                     video.get("height"),
+
+                "aspect_ratio":
+                    video.get(
+                        "aspect_ratio"
+                    ),
+
+                "stretched_ratio":
+                    video.get(
+                        "stretched_ratio"
+                    ),
 
                 "client":
                     client,
@@ -1661,7 +1726,9 @@ def choose_youtube_auto(
                 == str(quality)
 
                 and (
-                    item.get("size")
+                    item.get(
+                        "size"
+                    )
                     is None
 
                     or item["size"]
@@ -1685,15 +1752,15 @@ def download_youtube_sync(
         / "%(title).80s_%(id)s.%(ext)s"
     )
 
-    options = ytdlp_options(
+    opts = ytdlp_options(
         item["client"]
     )
 
-    options[
+    opts[
         "logger"
     ] = YTDLPLogger()
 
-    options.update(
+    opts.update(
         {
             "format":
                 (
@@ -1711,7 +1778,7 @@ def download_youtube_sync(
     )
 
     with yt_dlp.YoutubeDL(
-        options
+        opts
     ) as ydl:
 
         info = ydl.extract_info(
@@ -1751,98 +1818,83 @@ def cobalt_request_sync(
     quality: str,
 ) -> dict:
 
-    payloads = [
-        {
-            "url":
-                url,
+    payload = {
+        "url":
+            url,
 
-            "vCodec":
-                "h264",
+        "videoQuality":
+            quality,
 
-            "vQuality":
-                quality,
+        "audioFormat":
+            "best",
 
-            "aFormat":
-                "best",
+        "downloadMode":
+            "auto",
 
-            "downloadMode":
-                "auto",
-        },
-        {
-            "url":
-                url,
+        "filenameStyle":
+            "pretty",
 
-            "videoQuality":
-                quality,
+        "youtubeVideoCodec":
+            "h264",
+    }
 
-            "downloadMode":
-                "auto",
-
-            "filenameStyle":
-                "pretty",
-        },
-    ]
-
-    endpoints = [
-        f"{COBALT_API_URL}/api/json",
+    req = Request(
         f"{COBALT_API_URL}/",
-    ]
+        data=json.dumps(
+            payload
+        ).encode(
+            "utf-8"
+        ),
+        headers={
+            "Accept":
+                "application/json",
 
-    last_error = None
+            "Content-Type":
+                "application/json",
 
-    for endpoint in endpoints:
+            "User-Agent":
+                "VideoDownloader/1.0",
+        },
+        method="POST",
+    )
 
-        for payload in payloads:
+    try:
 
-            request = Request(
-                endpoint,
-                data=json.dumps(
-                    payload
-                ).encode(
+        with urlopen(
+            req,
+            timeout=DOWNLOAD_TIMEOUT,
+        ) as response:
+
+            return json.loads(
+                response.read().decode(
                     "utf-8"
-                ),
-                headers={
-                    "Accept":
-                        "application/json",
-
-                    "Content-Type":
-                        "application/json",
-
-                    "User-Agent":
-                        "VideoDownloader/1.0",
-                },
-                method="POST",
+                )
             )
 
-            try:
+    except HTTPError as exc:
 
-                with urlopen(
-                    request,
-                    timeout=DOWNLOAD_TIMEOUT,
-                ) as response:
+        body = exc.read().decode(
+            "utf-8",
+            errors="replace",
+        )
 
-                    data = json.loads(
-                        response.read().decode(
-                            "utf-8"
-                        )
-                    )
+        raise RuntimeError(
+            f"Cobalt HTTP {exc.code}: "
+            f"{body[:500]}"
+        ) from exc
 
-                if data:
+    except URLError as exc:
 
-                    return data
+        raise RuntimeError(
+            f"Cobalt connection error: "
+            f"{exc}"
+        ) from exc
 
-            except (
-                HTTPError,
-                URLError,
-                ValueError,
-            ) as exc:
+    except ValueError as exc:
 
-                last_error = exc
-
-    raise RuntimeError(
-        f"Cobalt request failed: "
-        f"{last_error}"
-    )
+        raise RuntimeError(
+            "Cobalt returned invalid JSON"
+        ) from exc
 
 
 def cobalt_media(
@@ -1854,8 +1906,7 @@ def cobalt_media(
     )
 
     if (
-        status
-        in (
+        status in (
             "tunnel",
             "redirect",
             "stream",
@@ -1870,12 +1921,10 @@ def cobalt_media(
                 response["url"],
 
             "filename":
-                (
-                    response.get(
-                        "filename"
-                    )
-                    or "video.mp4"
-                ),
+                response.get(
+                    "filename"
+                )
+                or "video.mp4",
         }
 
     if status == "picker":
@@ -1899,31 +1948,34 @@ def cobalt_media(
                         item["url"],
 
                     "filename":
-                        (
-                            item.get(
-                                "filename"
-                            )
-                            or "video.mp4"
-                        ),
+                        item.get(
+                            "filename"
+                        )
+                        or "video.mp4",
                 }
 
-    if (
-        response.get("url")
-        and status is None
-    ):
+    if response.get("url"):
 
         return {
             "url":
                 response["url"],
 
             "filename":
-                (
-                    response.get(
-                        "filename"
-                    )
-                    or "video.mp4"
-                ),
+                response.get(
+                    "filename"
+                )
+                or "video.mp4",
         }
+
+    error = response.get(
+        "error"
+    )
+
+    if error:
+
+        raise RuntimeError(
+            f"Cobalt error: {error}"
+        )
 
     return None
 
@@ -1943,12 +1995,16 @@ async def cobalt_items(
 
         try:
 
-            media = cobalt_media(
+            media = (
                 await asyncio.to_thread(
                     cobalt_request_sync,
                     url,
                     quality,
                 )
+            )
+
+            media = cobalt_media(
+                media
             )
 
             if media:
@@ -2071,16 +2127,13 @@ def download_direct_sync(
 
         return path
 
-    except Exception as exc:
+    except Exception:
 
         path.unlink(
             missing_ok=True
         )
 
-        raise RuntimeError(
-            f"Media download failed: "
-            f"{exc}"
-        ) from exc
+        raise
 
 
 # ============================================================
@@ -2094,9 +2147,7 @@ async def start(
     message: Message,
 ):
 
-    uid = (
-        message.from_user.id
-    )
+    uid = message.from_user.id
 
     logger.info(
         "START received from user %s",
@@ -2327,7 +2378,7 @@ async def privacy_command(
 
 
 # ============================================================
-# MAIN MENU
+# MENU
 # ============================================================
 
 @dp.callback_query(
@@ -2483,9 +2534,7 @@ async def settings_language(
     )
 
     await callback.answer(
-        TEXT[language][
-            "language_changed"
-        ]
+        TEXT[language]["language_changed"]
     )
 
 
@@ -2573,6 +2622,15 @@ async def text_router(
 ):
 
     uid = message.from_user.id
+
+    logger.info(
+        "TEXT received from user %s: %s",
+        uid,
+        (
+            message.text
+            or ""
+        )[:300],
+    )
 
     await ensure_user(
         uid,
@@ -2738,7 +2796,8 @@ async def text_router(
                 else:
 
                     raise RuntimeError(
-                        "All YouTube extractors and Cobalt failed"
+                        "All YouTube extractors and "
+                        "Cobalt failed"
                     )
 
             else:
@@ -2768,15 +2827,22 @@ async def text_router(
 
             info = None
 
-            # Instagram does not use YouTube's client argument.
             instagram_options = {
-                "quiet": True,
-                "no_warnings": False,
-                "noplaylist": True,
+                "quiet":
+                    True,
+
+                "no_warnings":
+                    False,
+
+                "noplaylist":
+                    True,
+
                 "socket_timeout":
                     DOWNLOAD_TIMEOUT,
+
                 "retries":
                     2,
+
                 "logger":
                     YTDLPLogger(),
             }
@@ -2794,8 +2860,10 @@ async def text_router(
                             download=False,
                         )
 
-                info = await asyncio.to_thread(
-                    extract_instagram
+                info = (
+                    await asyncio.to_thread(
+                        extract_instagram
+                    )
                 )
 
             except Exception as exc:
@@ -2805,8 +2873,9 @@ async def text_router(
                     exc,
                 )
 
-            if info and info.get(
-                "formats"
+            if (
+                info
+                and info.get("formats")
             ):
 
                 items = []
@@ -2826,21 +2895,27 @@ async def text_router(
 
                         continue
 
-                    estimated = (
-                        (
+                    estimated = None
+
+                    if (
+                        audio
+                        and video.get(
+                            "size"
+                        ) is not None
+                    ):
+
+                        estimated = (
                             video["size"]
                             + audio["size"]
                         )
-                        if (
-                            audio
-                            and video.get(
-                                "size"
-                            ) is not None
+
+                    elif video.get(
+                        "size"
+                    ) is not None:
+
+                        estimated = (
+                            video["size"]
                         )
-                        else video.get(
-                            "size"
-                        )
-                    )
 
                     items.append(
                         {
@@ -2851,15 +2926,11 @@ async def text_router(
                                 estimated,
 
                             "video_format_id":
-                                video[
-                                    "format_id"
-                                ],
+                                video["format_id"],
 
                             "audio_format_id":
                                 (
-                                    audio[
-                                        "format_id"
-                                    ]
+                                    audio["format_id"]
                                     if audio
                                     else None
                                 ),
@@ -2875,7 +2946,7 @@ async def text_router(
                                 ),
 
                             "client":
-                                "instagram",
+                                "web",
                         }
                     )
 
@@ -2898,10 +2969,16 @@ async def text_router(
                 else:
 
                     raise RuntimeError(
-                        "Instagram yt-dlp returned no usable formats"
+                        "Instagram yt-dlp returned "
+                        "no usable formats"
                     )
 
             else:
+
+                logger.info(
+                    "[Instagram] yt-dlp failed, "
+                    "trying Cobalt fallback"
+                )
 
                 cobalt = await cobalt_items(
                     url
@@ -2910,7 +2987,8 @@ async def text_router(
                 if not cobalt:
 
                     raise RuntimeError(
-                        "Instagram yt-dlp and Cobalt failed"
+                        "Instagram yt-dlp and "
+                        "Cobalt failed"
                     )
 
                 PENDING[uid] = {
@@ -2925,7 +3003,7 @@ async def text_router(
                 }
 
         # ----------------------------------------------------
-        # ALL OTHER SOURCES
+        # OTHER SOURCES
         # ----------------------------------------------------
 
         else:
@@ -3034,12 +3112,8 @@ async def quality_selected(
         "items"
     ]
 
-    source = pending[
-        "source"
-    ]
-
     if (
-        source
+        pending["source"]
         in (
             "youtube",
             "instagram_ytdlp",
@@ -3047,8 +3121,10 @@ async def quality_selected(
         and selection == "auto"
     ):
 
-        selected = choose_youtube_auto(
-            items
+        selected = (
+            choose_youtube_auto(
+                items
+            )
         )
 
     elif selection == "auto":
@@ -3073,8 +3149,9 @@ async def quality_selected(
                     == quality
 
                     and (
-                        item.get("size")
-                        is None
+                        item.get(
+                            "size"
+                        ) is None
 
                         or item["size"]
                         <= SAFE_FILE_BYTES
@@ -3160,6 +3237,10 @@ async def quality_selected(
 
     try:
 
+        source = pending[
+            "source"
+        ]
+
         # ----------------------------------------------------
         # YOUTUBE / INSTAGRAM via yt-dlp
         # ----------------------------------------------------
@@ -3185,10 +3266,8 @@ async def quality_selected(
                 or "Video"
             )
 
-            duration = (
-                info.get(
-                    "duration"
-                )
+            duration = info.get(
+                "duration"
             )
 
             width = selected.get(
@@ -3276,6 +3355,10 @@ async def quality_selected(
             )
 
             return
+
+        # ----------------------------------------------------
+        # TELEGRAM
+        # ----------------------------------------------------
 
         await status.edit_text(
             TEXT[language]["sending"]
@@ -3431,9 +3514,7 @@ async def history_menu(
 
             LIMIT 20
             """,
-            user_hash(
-                uid
-            ),
+            user_hash(uid),
         )
 
     if not rows:
@@ -3479,6 +3560,7 @@ async def history_menu(
                     text=(
                         f"🗑 {title[:30]}"
                     ),
+
                     callback_data=(
                         f"history_delete:"
                         f"{item['id']}"
@@ -3587,11 +3669,11 @@ async def history_clear(
             SELECT
                 telegram_chat_id,
                 telegram_message_id
-
             FROM downloads
 
-            WHERE user_hash = $1
-              AND status = 'success'
+            WHERE
+                user_hash = $1
+                AND status = 'success'
             """,
             user_hash(uid),
         )
@@ -3780,10 +3862,20 @@ async def admin_users(
             """
             SELECT *
             FROM users
+
             ORDER BY id DESC
+
             LIMIT 100
             """
         )
+
+    if not rows:
+
+        await message.answer(
+            "No users."
+        )
+
+        return
 
     text = (
         "👥 <b>Users</b>\n\n"
@@ -3877,6 +3969,14 @@ async def admin_recent(
             LIMIT 30
             """
         )
+
+    if not rows:
+
+        await message.answer(
+            "No downloads."
+        )
+
+        return
 
     lines = [
         "🧾 <b>Recent downloads</b>",
@@ -4051,7 +4151,8 @@ async def admin_broadcast(
 
         rows = await conn.fetch(
             """
-            SELECT telegram_id_encrypted
+            SELECT
+                telegram_id_encrypted
             FROM users
             WHERE is_blocked = FALSE
             """
