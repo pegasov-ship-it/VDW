@@ -86,8 +86,14 @@ DOWNLOAD_TIMEOUT = int(
     )
 )
 
-# Telegram file upload safety limit.
-# Keep it below 50 MB while using decimal MB for display.
+# ------------------------------------------------------------
+# Telegram Bot API upload safety limit.
+#
+# Current normal Bot API limit is kept below 50 MB.
+# Later, when Local Bot API Server is installed, this constant
+# can be raised separately.
+# ------------------------------------------------------------
+
 SAFE_FILE_BYTES = min(
     MAX_FILE_MB,
     TELEGRAM_MAX_FILE_MB,
@@ -96,6 +102,21 @@ SAFE_FILE_BYTES = min(
 SAFE_FILE_BYTES = min(
     SAFE_FILE_BYTES,
     49_500_000,
+)
+
+# ------------------------------------------------------------
+# Pre-flight size estimates are NOT exact.
+#
+# Some YouTube formats report stream sizes which are slightly
+# different from the final muxed MP4 size.
+#
+# Therefore we allow a 10 MB estimation zone and verify the
+# actual downloaded file before sending to Telegram.
+# ------------------------------------------------------------
+
+PREFLIGHT_FILE_BYTES = (
+    SAFE_FILE_BYTES
+    + 10_000_000
 )
 
 
@@ -186,7 +207,6 @@ INSTAGRAM_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Added 240p.
 QUALITY_ORDER = (
     2160,
     1440,
@@ -196,6 +216,22 @@ QUALITY_ORDER = (
     360,
     240,
 )
+
+COBALT_QUALITY_ORDER = (
+    720,
+    480,
+    360,
+    240,
+)
+
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".webm",
+    ".mkv",
+    ".avi",
+}
 
 
 # ============================================================
@@ -256,8 +292,8 @@ TEXT = {
             "Попробуйте более короткое видео.",
 
         "quality_too_large":
-            "⚠️ Это качество превышает лимит 50 МБ. "
-            "Выберите более низкое качество.",
+            "⚠️ Это качество после скачивания оказалось "
+            "больше 50 МБ. Выберите более низкое качество.",
 
         "failed":
             "❌ Не удалось обработать видео.\n\n"
@@ -299,6 +335,11 @@ TEXT = {
 
         "analysis_failed":
             "❌ Не удалось получить информацию о видео.",
+
+        "instagram_failed":
+            "❌ Не удалось получить видео из Instagram. "
+            "Возможно, ссылка ведёт на закрытый пост, "
+            "карусель или контент сейчас недоступен.",
 
         "download":
             "➕ Скачать видео",
@@ -378,8 +419,8 @@ TEXT = {
             "Please try a shorter video.",
 
         "quality_too_large":
-            "⚠️ This quality exceeds the 50 MB limit. "
-            "Choose a lower quality.",
+            "⚠️ This quality turned out to be larger "
+            "than 50 MB after downloading. Choose a lower quality.",
 
         "failed":
             "❌ Could not process the video.\n\n"
@@ -421,6 +462,11 @@ TEXT = {
 
         "analysis_failed":
             "❌ Could not get information about the video.",
+
+        "instagram_failed":
+            "❌ Could not get the Instagram video. "
+            "The link may be private, a carousel, "
+            "or currently unavailable.",
 
         "download":
             "➕ Download video",
@@ -573,8 +619,10 @@ async def ensure_user(
             DO UPDATE SET
                 username_encrypted =
                     EXCLUDED.username_encrypted,
+
                 first_name_encrypted =
                     EXCLUDED.first_name_encrypted,
+
                 last_activity =
                     EXCLUDED.last_activity
             """,
@@ -622,6 +670,24 @@ async def accept_terms(
         )
 
 
+async def set_blocked(
+    user_id: int,
+    value: bool,
+):
+
+    async with DB_POOL.acquire() as conn:
+
+        await conn.execute(
+            """
+            UPDATE users
+            SET is_blocked = $1
+            WHERE user_hash = $2
+            """,
+            value,
+            user_hash(user_id),
+        )
+
+
 async def delete_user_data(
     user_id: int,
 ):
@@ -646,24 +712,6 @@ async def delete_user_data(
             WHERE user_hash = $1
             """,
             key,
-        )
-
-
-async def set_blocked(
-    user_id: int,
-    value: bool,
-):
-
-    async with DB_POOL.acquire() as conn:
-
-        await conn.execute(
-            """
-            UPDATE users
-            SET is_blocked = $1
-            WHERE user_hash = $2
-            """,
-            value,
-            user_hash(user_id),
         )
 
 
@@ -722,8 +770,10 @@ async def record_download(
                 SET
                     downloads_count =
                         downloads_count + 1,
+
                     total_bytes =
                         total_bytes + $1
+
                 WHERE user_hash = $2
                 """,
                 int(size_bytes),
@@ -735,9 +785,9 @@ async def record_download(
             await conn.execute(
                 """
                 UPDATE users
-                SET
-                    failed_count =
-                        failed_count + 1
+                SET failed_count =
+                    failed_count + 1
+
                 WHERE user_hash = $1
                 """,
                 key,
@@ -753,6 +803,7 @@ def encrypt(
 ) -> Optional[str]:
 
     if value is None:
+
         return None
 
     return FERNET.encrypt(
@@ -769,9 +820,11 @@ def decrypt(
 ) -> Optional[str]:
 
     if not value:
+
         return None
 
     try:
+
         return FERNET.decrypt(
             value.encode(
                 "utf-8"
@@ -781,6 +834,7 @@ def decrypt(
         )
 
     except InvalidToken:
+
         return None
 
 
@@ -1013,13 +1067,23 @@ def quality_keyboard(
 
     rows = []
 
+    def preflight_ok(
+        item: dict,
+    ) -> bool:
+
+        size = item.get(
+            "size"
+        )
+
+        return (
+            size is None
+            or size <= PREFLIGHT_FILE_BYTES
+        )
+
     usable = [
         item
         for item in items
-        if (
-            item.get("size") is None
-            or item["size"] <= SAFE_FILE_BYTES
-        )
+        if preflight_ok(item)
     ]
 
     auto_quality = next(
@@ -1049,11 +1113,22 @@ def quality_keyboard(
             f"— {auto_quality}p"
         )
 
-        if item.get("size"):
+        if item.get("size") is not None:
 
             label += (
                 f" ~{fmt_bytes(item['size'])}"
             )
+
+            if (
+                item["size"]
+                <= SAFE_FILE_BYTES
+            ):
+
+                label += " ✅"
+
+            else:
+
+                label += " ⚠️"
 
         rows.append(
             [
@@ -1069,23 +1144,34 @@ def quality_keyboard(
         quality = item["quality"]
 
         if int(quality) > 1080:
+
             continue
 
         label = f"{quality}p"
 
-        if item.get("size") is not None:
+        size = item.get(
+            "size"
+        )
+
+        if size is not None:
 
             label += (
-                f" — "
-                f"~{fmt_bytes(item['size'])}"
+                f" — ~{fmt_bytes(size)}"
             )
 
             if (
-                item["size"]
+                size
                 <= SAFE_FILE_BYTES
             ):
 
                 label += " ✅"
+
+            elif (
+                size
+                <= PREFLIGHT_FILE_BYTES
+            ):
+
+                label += " ⚠️"
 
             else:
 
@@ -1103,7 +1189,8 @@ def quality_keyboard(
         )
 
     if any(
-        int(item["quality"]) > 1080
+        int(item["quality"])
+        > 1080
         for item in items
     ):
 
@@ -1249,16 +1336,20 @@ def get_format_size(
     )
 
     if value is None:
+
         return None
 
     try:
+
         return int(
             value
         )
+
     except (
         TypeError,
         ValueError,
     ):
+
         return None
 
 
@@ -1297,17 +1388,15 @@ def get_video_formats(
 
             continue
 
-        width = fmt.get(
-            "width"
-        )
-
         try:
 
-            if width is not None:
-
-                width = int(
-                    width
+            width = (
+                int(
+                    fmt["width"]
                 )
+                if fmt.get("width") is not None
+                else None
+            )
 
         except (
             TypeError,
@@ -1377,17 +1466,16 @@ def best_video_format(
 
             continue
 
-        vcodec = str(
+        codec = str(
             fmt.get("vcodec")
             or ""
         )
 
         h264 = int(
-            vcodec.startswith(
+            codec.startswith(
                 "avc1"
             )
-            or
-            vcodec.startswith(
+            or codec.startswith(
                 "h264"
             )
         )
@@ -1576,11 +1664,14 @@ def choose_youtube_auto(
         info
     ):
 
+        size = item.get(
+            "size"
+        )
+
         if (
-            item.get("size")
-            is None
-            or item["size"]
-            <= SAFE_FILE_BYTES
+            size is None
+            or size
+            <= PREFLIGHT_FILE_BYTES
         ):
 
             return item
@@ -1678,8 +1769,6 @@ def cobalt_request_sync(
             "pretty",
     }
 
-    # Used for Instagram/Reels.
-    # Cobalt supports alwaysProxy as an API request option.
     if always_proxy:
 
         payload[
@@ -1728,7 +1817,7 @@ def cobalt_request_sync(
 
         raise RuntimeError(
             f"Cobalt HTTP {exc.code}: "
-            f"{body[:500]}"
+            f"{body[:800]}"
         ) from exc
 
     except URLError as exc:
@@ -1747,6 +1836,14 @@ def cobalt_media(
         "status"
     )
 
+    logger.info(
+        "Cobalt response status=%s filename=%s",
+        status,
+        response.get(
+            "filename"
+        ),
+    )
+
     if (
         status in (
             "tunnel",
@@ -1754,6 +1851,7 @@ def cobalt_media(
             "stream",
             "success",
         )
+
         and response.get("url")
     ):
 
@@ -1780,6 +1878,7 @@ def cobalt_media(
             if (
                 item.get("type")
                 == "video"
+
                 and item.get("url")
             ):
 
@@ -1794,6 +1893,10 @@ def cobalt_media(
                         or "video.mp4",
                 }
 
+        raise RuntimeError(
+            "Cobalt picker has no video items"
+        )
+
     if status == "error":
 
         error = (
@@ -1803,53 +1906,234 @@ def cobalt_media(
             or {}
         )
 
-        raise RuntimeError(
-            "Cobalt error: "
-            + str(
-                error.get(
-                    "code"
-                )
-                or "unknown"
+        message = (
+            error.get(
+                "code"
             )
+            or response.get(
+                "text"
+            )
+            or "unknown"
+        )
+
+        raise RuntimeError(
+            f"Cobalt error: {message}"
         )
 
     raise RuntimeError(
-        "Unsupported Cobalt status: "
-        + str(status)
+        f"Unsupported Cobalt status: {status}"
+    )
+
+
+def download_cobalt_sync(
+    media_url: str,
+    directory: str,
+    filename: str,
+    max_bytes: int,
+    require_video: bool = True,
+):
+
+    safe_name = re.sub(
+        r"[^\w. -]+",
+        "_",
+        filename
+        or "video.mp4",
+    ).strip()
+
+    if not safe_name:
+
+        safe_name = "video.mp4"
+
+    path = (
+        Path(directory)
+        / Path(safe_name).name
+    )
+
+    if not path.suffix:
+
+        path = path.with_suffix(
+            ".mp4"
+        )
+
+    request = Request(
+        media_url,
+        headers={
+            "User-Agent":
+                "Mozilla/5.0"
+        },
+    )
+
+    total = 0
+
+    try:
+
+        with urlopen(
+            request,
+            timeout=DOWNLOAD_TIMEOUT,
+        ) as response:
+
+            content_type = (
+                response.headers.get(
+                    "Content-Type"
+                )
+                or ""
+            ).lower()
+
+            logger.info(
+                "Cobalt media content-type=%s",
+                content_type,
+            )
+
+            # Important for Instagram:
+            # a Reel/carousel URL can result in the cover image.
+            if (
+                require_video
+                and content_type.startswith(
+                    "image/"
+                )
+            ):
+
+                raise RuntimeError(
+                    "Cobalt returned image "
+                    f"content-type {content_type}"
+                )
+
+            with open(
+                path,
+                "wb",
+            ) as output:
+
+                while True:
+
+                    chunk = response.read(
+                        1024 * 1024
+                    )
+
+                    if not chunk:
+
+                        break
+
+                    total += len(
+                        chunk
+                    )
+
+                    if (
+                        max_bytes
+                        and total
+                        > max_bytes
+                    ):
+
+                        path.unlink(
+                            missing_ok=True
+                        )
+
+                        return (
+                            None,
+                            total,
+                            content_type,
+                        )
+
+                    output.write(
+                        chunk
+                    )
+
+        if (
+            require_video
+            and content_type
+            and not (
+                content_type.startswith(
+                    "video/"
+                )
+                or content_type
+                in (
+                    "application/octet-stream",
+                    "binary/octet-stream",
+                )
+            )
+            and path.suffix.lower()
+            not in VIDEO_EXTENSIONS
+        ):
+
+            path.unlink(
+                missing_ok=True
+            )
+
+            raise RuntimeError(
+                "Cobalt returned non-video "
+                f"content-type {content_type}"
+            )
+
+        if (
+            require_video
+            and path.suffix.lower()
+            not in VIDEO_EXTENSIONS
+            and not content_type.startswith(
+                "video/"
+            )
+        ):
+
+            path.unlink(
+                missing_ok=True
+            )
+
+            raise RuntimeError(
+                "Downloaded Cobalt media is "
+                "not recognized as video"
+            )
+
+        return (
+            path,
+            total,
+            content_type,
+        )
+
+    except Exception:
+
+        path.unlink(
+            missing_ok=True
+        )
+
+        raise
+
+
+def cobalt_probe_sync(
+    url: str,
+    quality: int,
+    always_proxy: bool,
+):
+
+    response = cobalt_request_sync(
+        url,
+        str(quality),
+        always_proxy=always_proxy,
+    )
+
+    return cobalt_media(
+        response
     )
 
 
 async def cobalt_items(
     url: str,
-    always_proxy: bool = False,
 ) -> list[dict]:
 
     result = []
 
-    # Cobalt accepts 240 as a videoQuality value.
-    for quality in (
-        "1080",
-        "720",
-        "480",
-        "360",
-        "240",
-    ):
+    for quality in COBALT_QUALITY_ORDER:
 
         try:
 
-            media = cobalt_media(
-                await asyncio.to_thread(
-                    cobalt_request_sync,
-                    url,
-                    quality,
-                    always_proxy,
-                )
+            media = await asyncio.to_thread(
+                cobalt_probe_sync,
+                url,
+                quality,
+                False,
             )
 
             result.append(
                 {
                     "quality":
-                        quality,
+                        str(quality),
 
                     "url":
                         media["url"],
@@ -1871,6 +2155,91 @@ async def cobalt_items(
             )
 
     return result
+
+
+# ============================================================
+# INSTAGRAM
+# ============================================================
+
+async def download_instagram_with_fallback(
+    url: str,
+    directory: str,
+):
+
+    last_error = None
+
+    # No user-facing quality menu for Instagram.
+    # Automatically try the most useful phone qualities.
+    for quality in (
+        720,
+        480,
+        360,
+        240,
+    ):
+
+        try:
+
+            logger.info(
+                "Instagram: requesting %sp via Cobalt",
+                quality,
+            )
+
+            media = await asyncio.to_thread(
+                cobalt_probe_sync,
+                url,
+                quality,
+                True,
+            )
+
+            path, size, content_type = (
+                await asyncio.to_thread(
+                    download_cobalt_sync,
+                    media["url"],
+                    directory,
+                    media["filename"],
+                    SAFE_FILE_BYTES,
+                    True,
+                )
+            )
+
+            if path is not None:
+
+                logger.info(
+                    "Instagram %sp downloaded: %s",
+                    quality,
+                    fmt_bytes(size),
+                )
+
+                return (
+                    path,
+                    quality,
+                    media["filename"],
+                )
+
+            logger.info(
+                "Instagram %sp exceeded "
+                "real size limit: %s",
+                quality,
+                fmt_bytes(size),
+            )
+
+        except Exception as exc:
+
+            last_error = exc
+
+            logger.warning(
+                "Instagram %sp failed: %s",
+                quality,
+                exc,
+            )
+
+    if last_error:
+
+        raise last_error
+
+    raise RuntimeError(
+        "Instagram returned no usable video"
+    )
 
 
 # ============================================================
@@ -2539,6 +2908,10 @@ async def text_router(
 
     try:
 
+        # ----------------------------------------------------
+        # YOUTUBE
+        # ----------------------------------------------------
+
         if is_youtube(
             url
         ):
@@ -2578,76 +2951,154 @@ async def text_router(
                     items,
             }
 
-        elif is_instagram(
+            await status.edit_text(
+                TEXT[language]["quality"],
+                reply_markup=quality_keyboard(
+                    language,
+                    items,
+                ),
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # INSTAGRAM
+        #
+        # No quality picker.
+        # Automatically download:
+        # 720 -> 480 -> 360 -> 240
+        # ----------------------------------------------------
+
+        if is_instagram(
             url
         ):
 
             logger.info(
                 "Routing Instagram/Reels "
-                "URL to Cobalt"
+                "to Cobalt with alwaysProxy"
             )
 
-            items = await cobalt_items(
-                url,
-                always_proxy=True,
-            )
+            if not is_admin(
+                user_id
+            ):
 
-            if not items:
-
-                raise RuntimeError(
-                    "No usable Instagram formats"
+                ACTIVE.add(
+                    user_id
                 )
 
-            PENDING[
-                user_id
-            ] = {
-                "source":
-                    "cobalt",
-
-                "url":
-                    url,
-
-                "items":
-                    items,
-            }
-
-        else:
-
-            logger.info(
-                "Routing URL to Cobalt"
+            await status.edit_text(
+                TEXT[language]["downloading"]
             )
 
-            items = await cobalt_items(
-                url,
-                always_proxy=False,
+            temp_dir = tempfile.mkdtemp(
+                prefix="vdw_ig_"
             )
 
-            if not items:
+            try:
 
-                raise RuntimeError(
-                    "No usable Cobalt formats"
+                media, quality, filename = (
+                    await download_instagram_with_fallback(
+                        url,
+                        temp_dir,
+                    )
                 )
 
-            PENDING[
-                user_id
-            ] = {
-                "source":
-                    "cobalt",
+                size_bytes = media.stat().st_size
 
-                "url":
+                title = (
+                    filename
+                    or "Instagram video"
+                )
+
+                await status.edit_text(
+                    TEXT[language]["sending"]
+                )
+
+                caption = (
+                    f"🎬 <b>{esc(title)}</b>\n"
+                    f"Quality: {quality}p\n"
+                    f"Size: {fmt_bytes(size_bytes)}"
+                )
+
+                await bot.send_video(
+                    chat_id=user_id,
+                    video=FSInputFile(
+                        str(media)
+                    ),
+                    caption=caption,
+                    supports_streaming=True,
+                )
+
+                await record_download(
+                    user_id,
+                    title,
                     url,
+                    str(quality),
+                    size_bytes,
+                    "success",
+                )
 
-                "items":
-                    items,
-            }
+                await status.edit_text(
+                    TEXT[language]["done"],
+                    reply_markup=main_keyboard(
+                        language
+                    ),
+                )
+
+            finally:
+
+                shutil.rmtree(
+                    temp_dir,
+                    ignore_errors=True,
+                )
+
+                PENDING.pop(
+                    user_id,
+                    None,
+                )
+
+                ACTIVE.discard(
+                    user_id
+                )
+
+            return
+
+        # ----------------------------------------------------
+        # OTHER SOURCES
+        # ----------------------------------------------------
+
+        logger.info(
+            "Routing URL to Cobalt"
+        )
+
+        items = await cobalt_items(
+            url
+        )
+
+        if not items:
+
+            raise RuntimeError(
+                "No usable Cobalt formats"
+            )
+
+        PENDING[
+            user_id
+        ] = {
+            "source":
+                "cobalt",
+
+            "url":
+                url,
+
+            "items":
+                items,
+        }
 
         await status.edit_text(
             TEXT[language]["quality"],
             reply_markup=quality_keyboard(
                 language,
-                PENDING[
-                    user_id
-                ]["items"],
+                items,
             ),
         )
 
@@ -2659,7 +3110,11 @@ async def text_router(
         )
 
         await status.edit_text(
-            TEXT[language]["analysis_failed"],
+            (
+                TEXT[language]["instagram_failed"]
+                if is_instagram(url)
+                else TEXT[language]["analysis_failed"]
+            ),
             reply_markup=back_keyboard(
                 language
             ),
@@ -2704,6 +3159,15 @@ async def quality_selected(
 
         return
 
+    if (
+        pending["source"]
+        == "instagram"
+    ):
+
+        await callback.answer()
+
+        return
+
     selection = (
         callback.data
         .split(
@@ -2718,15 +3182,24 @@ async def quality_selected(
 
     selected = None
 
+    # --------------------------------------------------------
+    # AUTO FOR YOUTUBE
+    # --------------------------------------------------------
+
     if (
         pending["source"]
         == "youtube"
-        and selection == "auto"
+        and selection
+        == "auto"
     ):
 
         selected = choose_youtube_auto(
             pending["info"]
         )
+
+    # --------------------------------------------------------
+    # AUTO FOR COBALT
+    # --------------------------------------------------------
 
     elif selection == "auto":
 
@@ -2742,11 +3215,15 @@ async def quality_selected(
                     if (
                         item["quality"]
                         == quality
+
                         and (
-                            item.get("size")
+                            item.get(
+                                "size"
+                            )
                             is None
+
                             or item["size"]
-                            <= SAFE_FILE_BYTES
+                            <= PREFLIGHT_FILE_BYTES
                         )
                     )
                 ),
@@ -2759,6 +3236,10 @@ async def quality_selected(
 
                 break
 
+    # --------------------------------------------------------
+    # BEST
+    # --------------------------------------------------------
+
     elif selection == "best":
 
         selected = max(
@@ -2768,6 +3249,10 @@ async def quality_selected(
                     item["quality"]
                 ),
         )
+
+    # --------------------------------------------------------
+    # EXPLICIT QUALITY
+    # --------------------------------------------------------
 
     else:
 
@@ -2798,35 +3283,27 @@ async def quality_selected(
         "size"
     )
 
+    # --------------------------------------------------------
+    # Only reject obviously-too-large preflight estimates.
+    #
+    # Small overages are allowed because final MP4 size can be
+    # lower than the sum of reported input stream sizes.
+    # --------------------------------------------------------
+
     if (
-        not is_admin(user_id)
-        and known_size is not None
-        and known_size > SAFE_FILE_BYTES
+        known_size is not None
+        and known_size
+        > PREFLIGHT_FILE_BYTES
+        and not is_admin(user_id)
     ):
 
-        if (
-            selected["quality"]
-            == "240"
-        ):
-
-            await callback.message.edit_text(
-                TEXT[language]["too_large"],
-                reply_markup=back_keyboard(
-                    language
-                ),
-            )
-
-        else:
-
-            await callback.message.edit_text(
-                TEXT[language][
-                    "quality_too_large"
-                ],
-                reply_markup=quality_keyboard(
-                    language,
-                    items,
-                ),
-            )
+        await callback.message.edit_text(
+            TEXT[language]["quality_too_large"],
+            reply_markup=quality_keyboard(
+                language,
+                items,
+            ),
+        )
 
         await callback.answer()
 
@@ -2851,6 +3328,10 @@ async def quality_selected(
     )
 
     try:
+
+        # ----------------------------------------------------
+        # YOUTUBE
+        # ----------------------------------------------------
 
         if (
             pending["source"]
@@ -2891,29 +3372,41 @@ async def quality_selected(
                 )
             )
 
+        # ----------------------------------------------------
+        # COBALT
+        # ----------------------------------------------------
+
         else:
 
-            media = await asyncio.to_thread(
-                download_direct_sync,
-                selected["url"],
-                temp_dir,
-                (
-                    None
-                    if is_admin(user_id)
-                    else SAFE_FILE_BYTES
-                ),
-                selected.get(
-                    "filename"
+            media, real_size, content_type = (
+                await asyncio.to_thread(
+                    download_cobalt_sync,
+                    selected["url"],
+                    temp_dir,
+                    selected.get(
+                        "filename"
+                    )
+                    or "video.mp4",
+                    (
+                        SAFE_FILE_BYTES
+                        if not is_admin(
+                            user_id
+                        )
+                        else 0
+                    ),
+                    True,
                 )
-                or "video.mp4",
             )
 
             if media is None:
 
                 await status.edit_text(
-                    TEXT[language]["too_large"],
-                    reply_markup=back_keyboard(
-                        language
+                    TEXT[language][
+                        "quality_too_large"
+                    ],
+                    reply_markup=quality_keyboard(
+                        language,
+                        items,
                     ),
                 )
 
@@ -2937,7 +3430,16 @@ async def quality_selected(
                 "does not exist"
             )
 
+        # ----------------------------------------------------
+        # FINAL REAL SIZE CHECK
+        # ----------------------------------------------------
+
         size_bytes = media.stat().st_size
+
+        logger.info(
+            "Final media size: %s",
+            fmt_bytes(size_bytes),
+        )
 
         if (
             not is_admin(user_id)
@@ -2953,31 +3455,21 @@ async def quality_selected(
                 "failed",
             )
 
-            if (
-                selected["quality"]
-                == "240"
-            ):
-
-                await status.edit_text(
-                    TEXT[language]["too_large"],
-                    reply_markup=back_keyboard(
-                        language
-                    ),
-                )
-
-            else:
-
-                await status.edit_text(
-                    TEXT[language][
-                        "quality_too_large"
-                    ],
-                    reply_markup=quality_keyboard(
-                        language,
-                        items,
-                    ),
-                )
+            await status.edit_text(
+                TEXT[language][
+                    "quality_too_large"
+                ],
+                reply_markup=quality_keyboard(
+                    language,
+                    items,
+                ),
+            )
 
             return
+
+        # ----------------------------------------------------
+        # DURATION LIMIT
+        # ----------------------------------------------------
 
         if (
             not is_admin(user_id)
@@ -3011,6 +3503,10 @@ async def quality_selected(
 
             return
 
+        # ----------------------------------------------------
+        # TELEGRAM SEND
+        # ----------------------------------------------------
+
         await status.edit_text(
             TEXT[language]["sending"]
         )
@@ -3032,23 +3528,17 @@ async def quality_selected(
 
         await bot.send_video(
             chat_id=user_id,
-
             video=FSInputFile(
                 str(media)
             ),
-
             duration=(
                 int(duration)
                 if duration
                 else None
             ),
-
             width=width,
-
             height=height,
-
             caption=caption,
-
             supports_streaming=True,
         )
 
@@ -3105,6 +3595,7 @@ async def quality_selected(
 
     finally:
 
+        # No permanent video storage on VDW.
         shutil.rmtree(
             temp_dir,
             ignore_errors=True,
@@ -3806,6 +4297,11 @@ async def main():
     logger.info(
         "SAFE_FILE_BYTES: %s",
         SAFE_FILE_BYTES,
+    )
+
+    logger.info(
+        "PREFLIGHT_FILE_BYTES: %s",
+        PREFLIGHT_FILE_BYTES,
     )
 
     logger.info(
